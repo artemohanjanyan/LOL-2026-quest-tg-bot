@@ -21,11 +21,7 @@ from quest_bot.models import (
     CaptainTransition,
     ContentPart,
     ContentType,
-    DeliveryStatus,
-    OutroDelivery,
-    OutroDeliveryPart,
     OutroKind,
-    OutroWorkItem,
     QuestSettings,
     Stage,
     Task,
@@ -674,10 +670,10 @@ class SQLiteQuestStore:
                         f"update {source_update_id} belongs to another captain"
                     )
                 state = self._state_in_transaction(connection, user_id)
-                return TransitionResult(state, duplicate, None, False)
+                return TransitionResult(state, duplicate, False)
             state = self._state_in_transaction(connection, user_id)
             if state.position is not CaptainPosition.NOT_STARTED:
-                return TransitionResult(state, None, None, False)
+                return TransitionResult(state, None, False)
             return self._transition_in_transaction(
                 connection,
                 state,
@@ -725,14 +721,13 @@ class SQLiteQuestStore:
                             f"update {source_update_id} belongs to another captain"
                         )
                     state = self._state_in_transaction(connection, user_id)
-                    delivery = self._delivery_for_user_in_transaction(connection, user_id)
-                    return TransitionResult(state, duplicate, delivery, False)
+                    return TransitionResult(state, duplicate, False)
             state = self._state_in_transaction(connection, user_id)
             if (
                 state.position is not expected_position
                 or state.current_stage_number != expected_stage_number
             ):
-                return TransitionResult(state, None, None, False)
+                return TransitionResult(state, None, False)
             return self._transition_in_transaction(
                 connection,
                 state,
@@ -871,19 +866,9 @@ class SQLiteQuestStore:
             "captain transition",
         )
         new_state = self._state_in_transaction(connection, state.user_id)
-        delivery: OutroDelivery | None = None
-        if target_position is CaptainPosition.FINISHED:
-            delivery = self._snapshot_outro_in_transaction(
-                connection, state.user_id, OutroKind.SUCCESS, recorded_at_ms
-            )
-        elif target_position is CaptainPosition.TIMED_OUT:
-            delivery = self._snapshot_outro_in_transaction(
-                connection, state.user_id, OutroKind.TIMEOUT, recorded_at_ms
-            )
         return TransitionResult(
             state=new_state,
             transition=self._transition_from_row(transition_row),
-            delivery=delivery,
             applied=True,
         )
 
@@ -1102,344 +1087,6 @@ class SQLiteQuestStore:
             )
         return tuple(summaries)
 
-    # Durable terminal-message outbox
-
-    def _snapshot_outro_in_transaction(
-        self,
-        connection: sqlite3.Connection,
-        user_id: int,
-        kind: OutroKind,
-        trigger_at_ms: int,
-    ) -> OutroDelivery:
-        table = _CONTENT_TABLES[kind.value]
-        parts = connection.execute(f"SELECT * FROM {table} ORDER BY part_number").fetchall()
-        status = DeliveryStatus.PENDING if parts else DeliveryStatus.DELIVERED
-        cursor = connection.execute(
-            """
-            INSERT INTO outro_deliveries (
-                user_id, kind, trigger_at_ms, status,
-                retry_count, next_attempt_at_ms, delivered_at_ms,
-                created_at_ms, updated_at_ms
-            ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                kind.value,
-                trigger_at_ms,
-                status.value,
-                trigger_at_ms if parts else None,
-                trigger_at_ms if not parts else None,
-                trigger_at_ms,
-                trigger_at_ms,
-            ),
-        )
-        if cursor.lastrowid is None:
-            raise RuntimeError("SQLite did not return the inserted delivery ID")
-        delivery_id = cursor.lastrowid
-        connection.executemany(
-            """
-            INSERT INTO outro_delivery_parts (
-                delivery_id, part_number, content_type, data, caption,
-                status, attempt_count, next_attempt_at_ms
-            ) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?)
-            """,
-            (
-                (
-                    delivery_id,
-                    int(row["part_number"]),
-                    str(row["content_type"]),
-                    str(row["data"]),
-                    None if row["caption"] is None else str(row["caption"]),
-                    trigger_at_ms,
-                )
-                for row in parts
-            ),
-        )
-        delivery = self._delivery_in_transaction(connection, delivery_id)
-        assert delivery is not None
-        return delivery
-
-    def get_outro_delivery(self, delivery_id: int) -> OutroDelivery | None:
-        return self._delivery_in_transaction(self._connection_or_raise(), delivery_id)
-
-    def get_outro_delivery_for_user(self, user_id: int) -> OutroDelivery | None:
-        return self._delivery_for_user_in_transaction(self._connection_or_raise(), user_id)
-
-    def get_outro_delivery_parts(self, delivery_id: int) -> tuple[OutroDeliveryPart, ...]:
-        rows = self._connection_or_raise().execute(
-            """
-            SELECT * FROM outro_delivery_parts
-            WHERE delivery_id = ?
-            ORDER BY part_number
-            """,
-            (delivery_id,),
-        )
-        return tuple(self._delivery_part_from_row(row) for row in rows)
-
-    def list_ready_outro_work(
-        self, now_ms: int, *, max_attempts: int = 5, limit: int = 100
-    ) -> tuple[OutroWorkItem, ...]:
-        if max_attempts <= 0 or limit <= 0:
-            raise ValueError("max_attempts and limit must be positive")
-        rows = (
-            self._connection_or_raise()
-            .execute(
-                """
-            SELECT
-                d.delivery_id AS d_delivery_id,
-                d.user_id AS d_user_id,
-                d.kind AS d_kind,
-                d.trigger_at_ms AS d_trigger_at_ms,
-                d.status AS d_status,
-                d.retry_count AS d_retry_count,
-                d.last_attempt_at_ms AS d_last_attempt_at_ms,
-                d.next_attempt_at_ms AS d_next_attempt_at_ms,
-                d.last_error AS d_last_error,
-                d.delivered_at_ms AS d_delivered_at_ms,
-                d.created_at_ms AS d_created_at_ms,
-                d.updated_at_ms AS d_updated_at_ms,
-                p.*
-            FROM outro_delivery_parts AS p
-            JOIN outro_deliveries AS d USING (delivery_id)
-            WHERE d.status IN ('pending', 'failed')
-              AND p.status IN ('pending', 'failed')
-              AND p.attempt_count < ?
-              AND coalesce(p.next_attempt_at_ms, 0) <= ?
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM outro_delivery_parts AS earlier
-                  WHERE earlier.delivery_id = p.delivery_id
-                    AND earlier.part_number < p.part_number
-                    AND earlier.status <> 'delivered'
-              )
-            ORDER BY coalesce(p.next_attempt_at_ms, 0), d.delivery_id, p.part_number
-            LIMIT ?
-            """,
-                (max_attempts, now_ms, limit),
-            )
-            .fetchall()
-        )
-        work: list[OutroWorkItem] = []
-        for row in rows:
-            delivery = OutroDelivery(
-                delivery_id=int(row["d_delivery_id"]),
-                user_id=int(row["d_user_id"]),
-                kind=OutroKind(str(row["d_kind"])),
-                trigger_at_ms=int(row["d_trigger_at_ms"]),
-                status=DeliveryStatus(str(row["d_status"])),
-                retry_count=int(row["d_retry_count"]),
-                last_attempt_at_ms=self._optional_int(row["d_last_attempt_at_ms"]),
-                next_attempt_at_ms=self._optional_int(row["d_next_attempt_at_ms"]),
-                last_error=self._optional_str(row["d_last_error"]),
-                delivered_at_ms=self._optional_int(row["d_delivered_at_ms"]),
-                created_at_ms=int(row["d_created_at_ms"]),
-                updated_at_ms=int(row["d_updated_at_ms"]),
-            )
-            work.append(OutroWorkItem(delivery, self._delivery_part_from_row(row)))
-        return tuple(work)
-
-    def mark_outro_part_sending(
-        self, delivery_id: int, part_number: int, attempted_at_ms: int
-    ) -> bool:
-        with self._transaction() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE outro_delivery_parts
-                SET status = 'sending',
-                    attempt_count = attempt_count + 1,
-                    last_attempt_at_ms = ?,
-                    next_attempt_at_ms = NULL,
-                    last_error = NULL
-                WHERE delivery_id = ? AND part_number = ?
-                  AND status IN ('pending', 'failed')
-                """,
-                (attempted_at_ms, delivery_id, part_number),
-            )
-            if cursor.rowcount != 1:
-                return False
-            self._refresh_delivery_in_transaction(connection, delivery_id, attempted_at_ms)
-            return True
-
-    def mark_outro_part_delivered(
-        self,
-        delivery_id: int,
-        part_number: int,
-        *,
-        telegram_message_id: int | None,
-        delivered_at_ms: int,
-    ) -> None:
-        with self._transaction() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE outro_delivery_parts
-                SET status = 'delivered',
-                    next_attempt_at_ms = NULL,
-                    last_error = NULL,
-                    telegram_message_id = ?,
-                    delivered_at_ms = ?
-                WHERE delivery_id = ? AND part_number = ?
-                """,
-                (
-                    telegram_message_id,
-                    delivered_at_ms,
-                    delivery_id,
-                    part_number,
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise RecordNotFoundError("outro delivery part does not exist")
-            self._refresh_delivery_in_transaction(connection, delivery_id, delivered_at_ms)
-
-    def mark_outro_part_failed(
-        self,
-        delivery_id: int,
-        part_number: int,
-        *,
-        error: str,
-        failed_at_ms: int,
-        next_attempt_at_ms: int | None,
-        max_attempts: int = 5,
-    ) -> None:
-        if max_attempts <= 0:
-            raise ValueError("max_attempts must be positive")
-        with self._transaction() as connection:
-            row = connection.execute(
-                """
-                SELECT attempt_count FROM outro_delivery_parts
-                WHERE delivery_id = ? AND part_number = ?
-                """,
-                (delivery_id, part_number),
-            ).fetchone()
-            if row is None:
-                raise RecordNotFoundError("outro delivery part does not exist")
-            attempt_count = int(row["attempt_count"])
-            retry_at = next_attempt_at_ms if attempt_count < max_attempts else None
-            connection.execute(
-                """
-                UPDATE outro_delivery_parts
-                SET status = 'failed',
-                    next_attempt_at_ms = ?,
-                    last_error = ?
-                WHERE delivery_id = ? AND part_number = ?
-                """,
-                (retry_at, error, delivery_id, part_number),
-            )
-            self._refresh_delivery_in_transaction(
-                connection, delivery_id, failed_at_ms, max_attempts=max_attempts
-            )
-
-    def recover_interrupted_outro_deliveries(self, now_ms: int) -> int:
-        with self._transaction() as connection:
-            delivery_rows = connection.execute(
-                """
-                SELECT DISTINCT delivery_id
-                FROM outro_delivery_parts
-                WHERE status = 'sending'
-                """
-            ).fetchall()
-            cursor = connection.execute(
-                """
-                UPDATE outro_delivery_parts
-                SET status = 'pending', next_attempt_at_ms = ?
-                WHERE status = 'sending'
-                """,
-                (now_ms,),
-            )
-            for row in delivery_rows:
-                self._refresh_delivery_in_transaction(connection, int(row["delivery_id"]), now_ms)
-            return cursor.rowcount
-
-    def retry_outro_for_user(self, user_id: int, now_ms: int) -> bool:
-        with self._transaction() as connection:
-            delivery_row = connection.execute(
-                """
-                SELECT delivery_id, status FROM outro_deliveries
-                WHERE user_id = ?
-                """,
-                (user_id,),
-            ).fetchone()
-            if delivery_row is None or str(delivery_row["status"]) == "delivered":
-                return False
-            delivery_id = int(delivery_row["delivery_id"])
-            cursor = connection.execute(
-                """
-                UPDATE outro_delivery_parts
-                SET status = 'pending', attempt_count = 0,
-                    last_attempt_at_ms = NULL, next_attempt_at_ms = ?,
-                    last_error = NULL
-                WHERE delivery_id = ? AND status <> 'delivered'
-                """,
-                (now_ms, delivery_id),
-            )
-            if cursor.rowcount == 0:
-                return False
-            self._refresh_delivery_in_transaction(connection, delivery_id, now_ms)
-            return True
-
-    def _refresh_delivery_in_transaction(
-        self,
-        connection: sqlite3.Connection,
-        delivery_id: int,
-        now_ms: int,
-        *,
-        max_attempts: int = 5,
-    ) -> None:
-        parts = connection.execute(
-            """
-            SELECT * FROM outro_delivery_parts
-            WHERE delivery_id = ? ORDER BY part_number
-            """,
-            (delivery_id,),
-        ).fetchall()
-        if not parts or all(str(part["status"]) == "delivered" for part in parts):
-            status = DeliveryStatus.DELIVERED
-            delivered_at = now_ms
-            next_attempt = None
-        elif any(str(part["status"]) == "sending" for part in parts):
-            status = DeliveryStatus.SENDING
-            delivered_at = None
-            next_attempt = None
-        else:
-            retryable = [
-                part
-                for part in parts
-                if str(part["status"]) != "delivered"
-                and int(part["attempt_count"]) < max_attempts
-                and part["next_attempt_at_ms"] is not None
-            ]
-            status = DeliveryStatus.PENDING if retryable else DeliveryStatus.FAILED
-            delivered_at = None
-            next_attempt = (
-                min(int(part["next_attempt_at_ms"]) for part in retryable) if retryable else None
-            )
-        last_attempt_values = [
-            int(part["last_attempt_at_ms"])
-            for part in parts
-            if part["last_attempt_at_ms"] is not None
-        ]
-        errors = [
-            str(part["last_error"]) for part in reversed(parts) if part["last_error"] is not None
-        ]
-        connection.execute(
-            """
-            UPDATE outro_deliveries
-            SET status = ?, retry_count = ?, last_attempt_at_ms = ?,
-                next_attempt_at_ms = ?, last_error = ?, delivered_at_ms = ?,
-                updated_at_ms = ?
-            WHERE delivery_id = ?
-            """,
-            (
-                status.value,
-                sum(int(part["attempt_count"]) for part in parts),
-                max(last_attempt_values) if last_attempt_values else None,
-                next_attempt,
-                errors[0] if errors else None,
-                delivered_at,
-                now_ms,
-                delivery_id,
-            ),
-        )
-
     # Row mapping and validation
 
     @staticmethod
@@ -1477,23 +1124,6 @@ class SQLiteQuestStore:
         ).fetchone()
         return None if row is None else self._transition_from_row(row)
 
-    def _delivery_in_transaction(
-        self, connection: sqlite3.Connection, delivery_id: int
-    ) -> OutroDelivery | None:
-        row = connection.execute(
-            "SELECT * FROM outro_deliveries WHERE delivery_id = ?",
-            (delivery_id,),
-        ).fetchone()
-        return None if row is None else self._delivery_from_row(row)
-
-    def _delivery_for_user_in_transaction(
-        self, connection: sqlite3.Connection, user_id: int
-    ) -> OutroDelivery | None:
-        row = connection.execute(
-            "SELECT * FROM outro_deliveries WHERE user_id = ?", (user_id,)
-        ).fetchone()
-        return None if row is None else self._delivery_from_row(row)
-
     @staticmethod
     def _require_row(row: sqlite3.Row | None, name: str) -> sqlite3.Row:
         if row is None:
@@ -1507,10 +1137,6 @@ class SQLiteQuestStore:
         if not isinstance(value, (int, str, bytes, bytearray)):
             raise TypeError(f"expected a SQLite integer value, got {type(value)!r}")
         return int(value)
-
-    @staticmethod
-    def _optional_str(value: object) -> str | None:
-        return None if value is None else str(value)
 
     @staticmethod
     def _user_from_row(row: sqlite3.Row) -> User:
@@ -1593,36 +1219,4 @@ class SQLiteQuestStore:
             event_at_ms=int(row["event_at_ms"]),
             recorded_at_ms=int(row["recorded_at_ms"]),
             source_update_id=int(row["source_update_id"]),
-        )
-
-    @staticmethod
-    def _delivery_from_row(row: sqlite3.Row) -> OutroDelivery:
-        return OutroDelivery(
-            delivery_id=int(row["delivery_id"]),
-            user_id=int(row["user_id"]),
-            kind=OutroKind(str(row["kind"])),
-            trigger_at_ms=int(row["trigger_at_ms"]),
-            status=DeliveryStatus(str(row["status"])),
-            retry_count=int(row["retry_count"]),
-            last_attempt_at_ms=SQLiteQuestStore._optional_int(row["last_attempt_at_ms"]),
-            next_attempt_at_ms=SQLiteQuestStore._optional_int(row["next_attempt_at_ms"]),
-            last_error=SQLiteQuestStore._optional_str(row["last_error"]),
-            delivered_at_ms=SQLiteQuestStore._optional_int(row["delivered_at_ms"]),
-            created_at_ms=int(row["created_at_ms"]),
-            updated_at_ms=int(row["updated_at_ms"]),
-        )
-
-    @staticmethod
-    def _delivery_part_from_row(row: sqlite3.Row) -> OutroDeliveryPart:
-        return OutroDeliveryPart(
-            delivery_id=int(row["delivery_id"]),
-            part_number=int(row["part_number"]),
-            content=SQLiteQuestStore._content_part_from_row(row),
-            status=DeliveryStatus(str(row["status"])),
-            attempt_count=int(row["attempt_count"]),
-            last_attempt_at_ms=SQLiteQuestStore._optional_int(row["last_attempt_at_ms"]),
-            next_attempt_at_ms=SQLiteQuestStore._optional_int(row["next_attempt_at_ms"]),
-            last_error=SQLiteQuestStore._optional_str(row["last_error"]),
-            telegram_message_id=SQLiteQuestStore._optional_int(row["telegram_message_id"]),
-            delivered_at_ms=SQLiteQuestStore._optional_int(row["delivered_at_ms"]),
         )

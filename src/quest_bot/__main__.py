@@ -31,10 +31,7 @@ def main() -> None:
                 settings.bootstrap_admin_username.lstrip("@"),
                 utc_now_ms(),
             )
-        service = QuestService(
-            store,
-            outro_max_attempts=settings.outro_max_attempts,
-        )
+        service = QuestService(store)
         application = create_application(settings, service)
         logging.getLogger(__name__).info(
             "Starting quest bot %s with database %s at schema %s and %ss sweep",

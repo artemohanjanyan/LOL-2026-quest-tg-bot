@@ -41,13 +41,6 @@ class OutroKind(StrEnum):
     TIMEOUT = "timeout"
 
 
-class DeliveryStatus(StrEnum):
-    PENDING = "pending"
-    SENDING = "sending"
-    DELIVERED = "delivered"
-    FAILED = "failed"
-
-
 def utc_now_ms() -> int:
     """Return the current Unix timestamp in UTC milliseconds."""
 
@@ -154,46 +147,9 @@ class TaskProgress:
 
 
 @dataclass(frozen=True, slots=True)
-class OutroDelivery:
-    delivery_id: int
-    user_id: int
-    kind: OutroKind
-    trigger_at_ms: int
-    status: DeliveryStatus
-    retry_count: int
-    last_attempt_at_ms: int | None
-    next_attempt_at_ms: int | None
-    last_error: str | None
-    delivered_at_ms: int | None
-    created_at_ms: int
-    updated_at_ms: int
-
-
-@dataclass(frozen=True, slots=True)
-class OutroDeliveryPart:
-    delivery_id: int
-    part_number: int
-    content: ContentPart
-    status: DeliveryStatus
-    attempt_count: int
-    last_attempt_at_ms: int | None
-    next_attempt_at_ms: int | None
-    last_error: str | None
-    telegram_message_id: int | None
-    delivered_at_ms: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class OutroWorkItem:
-    delivery: OutroDelivery
-    part: OutroDeliveryPart
-
-
-@dataclass(frozen=True, slots=True)
 class TransitionResult:
     state: CaptainState
     transition: CaptainTransition | None
-    delivery: OutroDelivery | None
     applied: bool
 
 

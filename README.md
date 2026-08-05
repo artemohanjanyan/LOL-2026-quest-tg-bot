@@ -21,9 +21,10 @@ recalculate existing progress.
 The default time limit is 80 minutes. It is intentionally enforced only when
 the independent 15-second sweep runs: a command remains valid after the derived
 deadline until that sweep atomically commits `timed_out`. The same transaction
-snapshots the timeout outro into a durable outbox. Success and timeout outros
-resume after restart, respect Telegram `retry_after`, and retry each part up to
-five times. `/retry_outro` requeues an exhausted delivery.
+does not perform network I/O; the configured timeout outro is sent immediately
+after the commit. Each outro part gets up to three in-memory attempts, respecting
+Telegram `retry_after` and using short backoff for network errors. Retry state is
+not persisted and interrupted deliveries are not resumed after restart.
 
 ## Content and roles
 
@@ -87,4 +88,4 @@ SQLite is the durable source of truth. The process enables foreign keys, WAL,
 and a bounded busy timeout, runs packaged versioned migrations at startup, and
 holds an adjacent `.lock` file so two bot processes cannot use the same quest
 database. Back up the database (including WAL state, or use SQLite's backup
-facility) and rehearse restart/outro recovery before the event.
+facility) and rehearse backup and restart procedures before the event.

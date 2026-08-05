@@ -17,7 +17,6 @@ class Settings:
     bootstrap_admin_username: str = "admin"
     sweep_interval_seconds: int = 15
     database_busy_timeout_ms: int = 5_000
-    outro_max_attempts: int = 5
     delivery_rate_per_second: int = 20
 
     def __post_init__(self) -> None:
@@ -27,8 +26,6 @@ class Settings:
             raise ValueError("sweep interval must be positive")
         if self.database_busy_timeout_ms <= 0:
             raise ValueError("database busy timeout must be positive")
-        if self.outro_max_attempts <= 0:
-            raise ValueError("outro max attempts must be positive")
         if self.delivery_rate_per_second <= 0:
             raise ValueError("delivery rate must be positive")
         if self.bootstrap_admin_id is not None and self.bootstrap_admin_id <= 0:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from quest_bot.models import CaptainPosition, ContentPart, ContentType, OutroKind
+from quest_bot.models import CaptainPosition
 from quest_bot.storage.base import QuestStore
 from quest_bot.storage.sqlite import SQLiteQuestStore
 from tests.quest_setup import (
@@ -190,7 +190,7 @@ def test_skip_transition_records_that_unsolved_tasks_were_left_behind(
     assert store.list_captain_transitions(CAPTAIN_ID)[-1].skipped_unsolved_tasks
 
 
-def test_timeout_is_claimed_by_sweep_and_uses_timeout_outro(store: QuestStore) -> None:
+def test_timeout_is_claimed_by_sweep(store: QuestStore) -> None:
     seed_users(store)
     seed_ready_quest(store)
     store.set_time_limit(1, BASE_TIME_MS)
@@ -216,13 +216,9 @@ def test_timeout_is_claimed_by_sweep_and_uses_timeout_outro(store: QuestStore) -
 
     assert len(claimed) == 1
     assert claimed[0].state.position is CaptainPosition.TIMED_OUT
-    assert claimed[0].delivery is not None
-    assert claimed[0].delivery.kind is OutroKind.TIMEOUT
-    timeout_parts = store.get_outro_delivery_parts(claimed[0].delivery.delivery_id)
-    assert [part.content.data for part in timeout_parts] == ["TIMEOUT OUTRO: The clock wins"]
 
 
-def test_finishing_during_sweep_grace_uses_success_outro(store: QuestStore) -> None:
+def test_finishing_during_sweep_grace_reaches_terminal_state(store: QuestStore) -> None:
     seed_users(store)
     seed_ready_quest(store)
     store.set_time_limit(1, BASE_TIME_MS)
@@ -243,16 +239,3 @@ def test_finishing_during_sweep_grace_uses_success_outro(store: QuestStore) -> N
     )
 
     assert finished.state.position is CaptainPosition.FINISHED
-    assert finished.delivery is not None
-    assert finished.delivery.kind is OutroKind.SUCCESS
-    success_parts = store.get_outro_delivery_parts(finished.delivery.delivery_id)
-    assert [part.content.data for part in success_parts] == ["SUCCESS OUTRO: Reform Club reached"]
-
-    store.replace_outro_parts(
-        OutroKind.SUCCESS,
-        [ContentPart(ContentType.TEXT, "A newly configured ending")],
-    )
-    snapshotted_parts = store.get_outro_delivery_parts(finished.delivery.delivery_id)
-    assert [part.content.data for part in snapshotted_parts] == [
-        "SUCCESS OUTRO: Reform Club reached"
-    ]

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from quest_bot.errors import DeliveryFailure, InvalidQuestState, NotAuthorized
-from quest_bot.models import CaptainPosition, ContentPart, DeliveryStatus, OutroKind
+from quest_bot.errors import InvalidQuestState, NotAuthorized
+from quest_bot.models import CaptainPosition
 from quest_bot.service import QuestService
 from quest_bot.storage.base import QuestStore
 from quest_bot.storage.sqlite import SQLiteQuestStore
@@ -27,25 +27,6 @@ class MutableClock:
 
     def __call__(self) -> int:
         return self.now_ms
-
-
-@dataclass(slots=True)
-class RecordingOutroSender:
-    sent: list[tuple[int, ContentPart]] = field(default_factory=list)
-
-    async def send_outro_part(self, chat_id: int, part: ContentPart) -> int:
-        self.sent.append((chat_id, part))
-        return 1_000 + len(self.sent)
-
-
-@dataclass(slots=True)
-class FailingOutroSender:
-    calls: int = 0
-
-    async def send_outro_part(self, chat_id: int, part: ContentPart) -> int:
-        del chat_id, part
-        self.calls += 1
-        raise DeliveryFailure("Telegram remains unavailable")
 
 
 @pytest.fixture
@@ -191,8 +172,7 @@ def test_unresolved_stage_requires_explicit_confirmation_before_advance(
     assert store.list_captain_transitions(CAPTAIN_ID)[-1].skipped_unsolved_tasks
 
 
-@pytest.mark.asyncio
-async def test_overdue_commands_work_until_sweep_claims_timeout(
+def test_overdue_commands_work_until_sweep_claims_timeout(
     service_and_store: tuple[QuestService, QuestStore, MutableClock],
 ) -> None:
     service, _, clock = service_and_store
@@ -215,15 +195,11 @@ async def test_overdue_commands_work_until_sweep_claims_timeout(
     assert late_answer.created
     assert service.status(CAPTAIN_ID).state.position is CaptainPosition.STAGE
 
-    sender = RecordingOutroSender()
-    sweep = await service.sweep_and_deliver(sender)
+    sweep = service.sweep_timeouts()
 
-    assert sweep.expired_captains == 1
-    assert sweep.delivered_parts == 1
+    assert sweep.expired_user_ids == (CAPTAIN_ID,)
+    assert [part.data for part in sweep.outro_parts] == ["TIMEOUT OUTRO: The clock wins"]
     assert service.status(CAPTAIN_ID).state.position is CaptainPosition.TIMED_OUT
-    assert [(chat_id, part.data) for chat_id, part in sender.sent] == [
-        (CAPTAIN_ID, "TIMEOUT OUTRO: The clock wins")
-    ]
     with pytest.raises(InvalidQuestState, match="terminal"):
         service.answer(
             CAPTAIN_ID,
@@ -234,8 +210,7 @@ async def test_overdue_commands_work_until_sweep_claims_timeout(
         )
 
 
-@pytest.mark.asyncio
-async def test_finish_during_sweep_grace_uses_success_outro(
+def test_finish_during_sweep_grace_prevents_later_timeout(
     service_and_store: tuple[QuestService, QuestStore, MutableClock],
 ) -> None:
     service, _, clock = service_and_store
@@ -256,49 +231,12 @@ async def test_finish_during_sweep_grace_uses_success_outro(
     )
     assert finished.finished
     assert finished.state.position is CaptainPosition.FINISHED
+    assert [part.data for part in finished.outro_parts] == ["SUCCESS OUTRO: Reform Club reached"]
 
-    sender = RecordingOutroSender()
-    sweep = await service.sweep_and_deliver(sender)
-
-    assert sweep.expired_captains == 0
-    assert [(chat_id, part.data) for chat_id, part in sender.sent] == [
-        (CAPTAIN_ID, "SUCCESS OUTRO: Reform Club reached")
-    ]
-    delivery = service.store.get_outro_delivery_for_user(CAPTAIN_ID)
-    assert delivery is not None
-    assert delivery.kind is OutroKind.SUCCESS
-
-
-@pytest.mark.asyncio
-async def test_outro_delivery_stops_after_five_automatic_attempts(
-    service_and_store: tuple[QuestService, QuestStore, MutableClock],
-) -> None:
-    service, store, clock = service_and_store
-    service.start(CAPTAIN_ID, event_at_ms=clock.now_ms, source_update_id=60)
-    service.advance(
-        CAPTAIN_ID,
-        event_at_ms=clock.now_ms + 1_000,
-        source_update_id=61,
-    )
-    service.advance(
-        CAPTAIN_ID,
-        event_at_ms=clock.now_ms + 2_000,
-        source_update_id=62,
-        confirm_skip=True,
-    )
-    sender = FailingOutroSender()
-
-    for _ in range(5):
-        await service.sweep_and_deliver(sender)
-        clock.now_ms += 60_000
-
-    delivery = store.get_outro_delivery_for_user(CAPTAIN_ID)
-    assert delivery is not None
-    assert delivery.status is DeliveryStatus.FAILED
-    parts = store.get_outro_delivery_parts(delivery.delivery_id)
-    assert parts[0].attempt_count == 5
-    await service.sweep_and_deliver(sender)
-    assert sender.calls == 5
+    sweep = service.sweep_timeouts()
+    assert sweep.expired_user_ids == ()
+    assert sweep.outro_parts == ()
+    assert service.status(CAPTAIN_ID).state.position is CaptainPosition.FINISHED
 
 
 def test_admin_content_changes_require_admin_role(

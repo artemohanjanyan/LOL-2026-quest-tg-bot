@@ -41,7 +41,6 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 /broadcast — підготувати оголошення
 /leaderboard — показати таблицю результатів
 /progress <username|telegram_id> — показати прогрес капітана
-/retry_outro <username|telegram_id> — повторити невдалу фінальну звістку
 /set_intro — налаштувати вступ
 /set_success_outro — налаштувати успішний фінал
 /set_timeout_outro — налаштувати фінал за часом
@@ -65,7 +64,6 @@ USAGE_ANSWER = "Формат: /answer <номер завдання> <відпо�
 USAGE_ADD_CAPTAIN = "Формат: /add_captain <telegram_id> <username>"
 USAGE_REMOVE_CAPTAIN = "Формат: /remove_captain <telegram_id>"
 USAGE_PROGRESS = "Формат: /progress <username або telegram_id>"
-USAGE_RETRY_OUTRO = "Формат: /retry_outro <username або telegram_id>"
 USAGE_SET_STAGE = "Формат: /set_stage <номер етапу> <назва>"
 USAGE_SET_TASK = "Формат: /set_task <номер етапу> <номер завдання>"
 USAGE_CORRECT_ANSWER = "Формат: /correct_answer <відповідь>"
@@ -244,20 +242,6 @@ NO_SKIP_CONFIRMATION = "Немає переходу, який очікує пі�
 # Terminal states and delivery -------------------------------------------------
 
 QUEST_FINISHED = "Маршрут пройдено! Ви дісталися фінішу раніше, ніж експедиція зачинила шлях."
-QUEST_TIMED_OUT = (
-    "Годинник завершив відлік. Експедиція зупиняє ваш маршрут і надсилає фінальну звістку."
-)
-OUTRO_QUEUED = "Фінальну звістку підготовлено до відправлення."
-OUTRO_DELIVERED = "Фінальну звістку доставлено."
-OUTRO_RETRY_QUEUED = "Повторне відправлення фінальної звістки поставлено в чергу."
-OUTRO_NOT_FAILED = "Для цього капітана немає невдалої фінальної доставки."
-
-
-def outro_delivery_failed(*, attempts: int) -> str:
-    return (
-        f"Не вдалося доставити фінальну звістку після {attempts} спроб. "
-        "Організатор може скористатися /retry_outro."
-    )
 
 
 # Admin workflow ---------------------------------------------------------------
@@ -326,16 +310,11 @@ __all__ = [
     "NO_CURRENT_STAGE",
     "NO_SKIP_CONFIRMATION",
     "NO_STAGES",
-    "OUTRO_DELIVERED",
-    "OUTRO_NOT_FAILED",
-    "OUTRO_QUEUED",
-    "OUTRO_RETRY_QUEUED",
     "PERMISSION_DENIED",
     "QUEST_ALREADY_STARTED",
     "QUEST_FINISHED",
     "QUEST_NOT_READY",
     "QUEST_STARTED",
-    "QUEST_TIMED_OUT",
     "SKIP_CANCELLED",
     "SKIP_CONFIRMED",
     "TASK_ALREADY_SOLVED",
@@ -351,7 +330,6 @@ __all__ = [
     "USAGE_DELETE_TASK",
     "USAGE_PROGRESS",
     "USAGE_REMOVE_CAPTAIN",
-    "USAGE_RETRY_OUTRO",
     "USAGE_SET_SCORES",
     "USAGE_SET_STAGE",
     "USAGE_SET_TASK",
@@ -365,7 +343,6 @@ __all__ = [
     "captain_removed",
     "format_duration",
     "help_message",
-    "outro_delivery_failed",
     "quest_started",
     "scores_updated",
     "skip_warning",

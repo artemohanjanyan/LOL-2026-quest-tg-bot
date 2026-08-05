@@ -37,11 +37,3 @@ class ContentValidationError(QuestError):
 
 class NotFound(QuestError):
     """A requested quest entity does not exist."""
-
-
-class DeliveryFailure(QuestError):
-    """A Telegram delivery failed and may be retried later."""
-
-    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
-        super().__init__(message)
-        self.retry_after_seconds = retry_after_seconds

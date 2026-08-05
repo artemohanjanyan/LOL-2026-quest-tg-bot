@@ -10,10 +10,7 @@ from quest_bot.models import (
     CaptainSummary,
     CaptainTransition,
     ContentPart,
-    OutroDelivery,
-    OutroDeliveryPart,
     OutroKind,
-    OutroWorkItem,
     QuestSettings,
     Stage,
     TaskAttempt,
@@ -169,41 +166,3 @@ class QuestStore(Protocol):
         include_admins: bool = False,
         include_inactive: bool = False,
     ) -> tuple[CaptainSummary, ...]: ...
-
-    def get_outro_delivery(self, delivery_id: int) -> OutroDelivery | None: ...
-
-    def get_outro_delivery_for_user(self, user_id: int) -> OutroDelivery | None: ...
-
-    def get_outro_delivery_parts(self, delivery_id: int) -> tuple[OutroDeliveryPart, ...]: ...
-
-    def list_ready_outro_work(
-        self, now_ms: int, *, max_attempts: int = 5, limit: int = 100
-    ) -> tuple[OutroWorkItem, ...]: ...
-
-    def mark_outro_part_sending(
-        self, delivery_id: int, part_number: int, attempted_at_ms: int
-    ) -> bool: ...
-
-    def mark_outro_part_delivered(
-        self,
-        delivery_id: int,
-        part_number: int,
-        *,
-        telegram_message_id: int | None,
-        delivered_at_ms: int,
-    ) -> None: ...
-
-    def mark_outro_part_failed(
-        self,
-        delivery_id: int,
-        part_number: int,
-        *,
-        error: str,
-        failed_at_ms: int,
-        next_attempt_at_ms: int | None,
-        max_attempts: int = 5,
-    ) -> None: ...
-
-    def recover_interrupted_outro_deliveries(self, now_ms: int) -> int: ...
-
-    def retry_outro_for_user(self, user_id: int, now_ms: int) -> bool: ...

@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
 
 from quest_bot.errors import (
     ContentValidationError,
-    DeliveryFailure,
     InactiveUser,
     InvalidQuestState,
     NotAuthorized,
@@ -39,12 +35,7 @@ from quest_bot.storage.base import (
     TaskAlreadySolvedError,
 )
 
-LOGGER = logging.getLogger(__name__)
 MAX_TASKS_PER_STAGE = 9
-
-
-class OutroSender(Protocol):
-    async def send_outro_part(self, chat_id: int, part: ContentPart) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +58,7 @@ class AdvanceResult:
     unsolved_task_numbers: tuple[int, ...]
     finished: bool
     applied: bool
+    outro_parts: tuple[ContentPart, ...] = ()
 
     @property
     def needs_confirmation(self) -> bool:
@@ -94,10 +86,9 @@ class StatusSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class DeliverySweepResult:
-    expired_captains: int
-    delivered_parts: int
-    failed_parts: int
+class TimeoutSweepResult:
+    expired_user_ids: tuple[int, ...]
+    outro_parts: tuple[ContentPart, ...]
 
 
 class QuestService:
@@ -108,17 +99,9 @@ class QuestService:
         store: QuestStore,
         *,
         clock: Callable[[], int] = utc_now_ms,
-        outro_max_attempts: int = 5,
-        outro_concurrency: int = 5,
     ) -> None:
-        if outro_max_attempts <= 0:
-            raise ValueError("outro_max_attempts must be positive")
-        if outro_concurrency <= 0:
-            raise ValueError("outro_concurrency must be positive")
         self.store = store
         self._clock = clock
-        self._outro_max_attempts = outro_max_attempts
-        self._outro_concurrency = outro_concurrency
 
     # Authorization ---------------------------------------------------------
 
@@ -232,6 +215,11 @@ class QuestService:
                 (),
                 actual_state.position is CaptainPosition.FINISHED,
                 False,
+                (
+                    self.store.get_outro_parts(OutroKind.SUCCESS)
+                    if actual_state.position is CaptainPosition.FINISHED
+                    else ()
+                ),
             )
 
         presentation = (
@@ -243,6 +231,11 @@ class QuestService:
             (),
             target_position is CaptainPosition.FINISHED,
             transition.applied,
+            (
+                self.store.get_outro_parts(OutroKind.SUCCESS)
+                if target_position is CaptainPosition.FINISHED
+                else ()
+            ),
         )
 
     def answer(
@@ -505,94 +498,16 @@ class QuestService:
             if user.role is UserRole.CAPTAIN
         )
 
-    def retry_outro(self, actor_id: int, reference: str) -> bool:
-        self.require_admin(actor_id)
-        target = self.resolve_user(reference)
-        return self.store.retry_outro_for_user(target.user_id, self._clock())
+    # Timeout sweep ---------------------------------------------------------
 
-    # Timeout and durable outro delivery -----------------------------------
-
-    def recover_outro_deliveries(self) -> int:
-        return self.store.recover_interrupted_outro_deliveries(self._clock())
-
-    async def sweep_and_deliver(self, sender: OutroSender) -> DeliverySweepResult:
-        now = self._clock()
-        expired = self.store.claim_overdue_captains(now)
-        delivered = 0
-        failed = 0
-        semaphore = asyncio.Semaphore(self._outro_concurrency)
-
-        async def deliver_one(work_index: int) -> tuple[int, int]:
-            work = ready[work_index]
-            async with semaphore:
-                attempted_at = self._clock()
-                claimed = self.store.mark_outro_part_sending(
-                    work.delivery.delivery_id,
-                    work.part.part_number,
-                    attempted_at,
-                )
-                if not claimed:
-                    return (0, 0)
-                try:
-                    message_id = await sender.send_outro_part(
-                        work.delivery.user_id, work.part.content
-                    )
-                except DeliveryFailure as error:
-                    delay = self._retry_delay_ms(
-                        work.part.attempt_count + 1,
-                        error.retry_after_seconds,
-                    )
-                    self.store.mark_outro_part_failed(
-                        work.delivery.delivery_id,
-                        work.part.part_number,
-                        error=str(error),
-                        failed_at_ms=self._clock(),
-                        next_attempt_at_ms=self._clock() + delay,
-                        max_attempts=self._outro_max_attempts,
-                    )
-                    return (0, 1)
-                except Exception as error:  # noqa: BLE001 - delivery must remain durable
-                    LOGGER.exception(
-                        "Unexpected outro delivery error",
-                        extra={
-                            "delivery_id": work.delivery.delivery_id,
-                            "part_number": work.part.part_number,
-                        },
-                    )
-                    delay = self._retry_delay_ms(work.part.attempt_count + 1, None)
-                    self.store.mark_outro_part_failed(
-                        work.delivery.delivery_id,
-                        work.part.part_number,
-                        error=repr(error),
-                        failed_at_ms=self._clock(),
-                        next_attempt_at_ms=self._clock() + delay,
-                        max_attempts=self._outro_max_attempts,
-                    )
-                    return (0, 1)
-                self.store.mark_outro_part_delivered(
-                    work.delivery.delivery_id,
-                    work.part.part_number,
-                    telegram_message_id=message_id,
-                    delivered_at_ms=self._clock(),
-                )
-                return (1, 0)
-
-        # Only the earliest unfinished part of a delivery is claimable. Looping
-        # lets all parts drain in order while different captains run concurrently.
-        while True:
-            ready = self.store.list_ready_outro_work(
-                self._clock(),
-                max_attempts=self._outro_max_attempts,
-                limit=100,
-            )
-            if not ready:
-                break
-            outcomes = await asyncio.gather(*(deliver_one(index) for index in range(len(ready))))
-            delivered += sum(item[0] for item in outcomes)
-            failed += sum(item[1] for item in outcomes)
-            if delivered == 0 and failed:
-                break
-        return DeliverySweepResult(len(expired), delivered, failed)
+    def sweep_timeouts(self) -> TimeoutSweepResult:
+        expired = self.store.claim_overdue_captains(self._clock())
+        if not expired:
+            return TimeoutSweepResult((), ())
+        return TimeoutSweepResult(
+            tuple(result.state.user_id for result in expired),
+            self.store.get_outro_parts(OutroKind.TIMEOUT),
+        )
 
     # Internal helpers ------------------------------------------------------
 
@@ -624,22 +539,14 @@ class QuestService:
         if user_id <= 0 or not username.strip().lstrip("@"):
             raise ContentValidationError("invalid captain")
 
-    @staticmethod
-    def _retry_delay_ms(attempt_number: int, retry_after_seconds: float | None) -> int:
-        if retry_after_seconds is not None:
-            return max(1_000, int(retry_after_seconds * 1_000))
-        exponent: int = max(0, attempt_number - 1)
-        return min(60_000, (1 << exponent) * 1_000)
-
 
 __all__ = [
     "AdvanceResult",
     "AnswerResult",
-    "DeliverySweepResult",
     "MAX_TASKS_PER_STAGE",
-    "OutroSender",
     "QuestService",
     "StagePresentation",
     "StartResult",
     "StatusSnapshot",
+    "TimeoutSweepResult",
 ]

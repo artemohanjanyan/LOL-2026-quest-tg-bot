@@ -223,3 +223,46 @@ async def test_application_post_init_registers_independent_timeout_sweep(
     assert [job.name for job in jobs] == ["quest-timeout-sweep"]
     control_methods = [method for method, _ in bot_harness.telegram.calls]
     assert "setMyCommands" in control_methods
+
+
+@pytest.mark.asyncio
+async def test_finishing_quest_sends_current_success_outro(
+    bot_harness: BotHarness,
+) -> None:
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/next_stage")
+    bot_harness.telegram.clear()
+
+    await captain.send("/confirm_next_stage")
+
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
+        messages.SKIP_CONFIRMED,
+        messages.QUEST_FINISHED,
+        "SUCCESS OUTRO: Reform Club reached",
+    ]
+    state = bot_harness.store.get_captain_state(CAPTAIN_ID)
+    assert state is not None
+    assert state.position is CaptainPosition.FINISHED
+
+
+@pytest.mark.asyncio
+async def test_startup_timeout_sweep_sends_current_timeout_outro(
+    bot_harness: BotHarness,
+) -> None:
+    bot_harness.service.set_time_limit(ADMIN_ID, 1)
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    bot_harness.clock.now_ms += 60_001
+    bot_harness.telegram.clear()
+    post_init = bot_harness.application.post_init
+    assert post_init is not None
+
+    await post_init(bot_harness.application)
+
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == ["TIMEOUT OUTRO: The clock wins"]
+    state = bot_harness.store.get_captain_state(CAPTAIN_ID)
+    assert state is not None
+    assert state.position is CaptainPosition.TIMED_OUT

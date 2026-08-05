@@ -2,24 +2,55 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Final, assert_never
 
 from telegram import Bot, Message
-from telegram.error import RetryAfter, TelegramError
+from telegram.error import (
+    BadRequest,
+    Forbidden,
+    NetworkError,
+    RetryAfter,
+    TelegramError,
+)
 
-from quest_bot.errors import DeliveryFailure
 from quest_bot.models import ContentPart, ContentType
 
 PLAIN_PARSE_MODE: Final[None] = None
+OUTRO_MAX_ATTEMPTS: Final = 3
+LOGGER = logging.getLogger(__name__)
+
+SleepCallable = Callable[[float], Awaitable[None]]
+
+
+async def _default_sleep(delay_seconds: float) -> None:
+    await asyncio.sleep(delay_seconds)
+
+
+@dataclass(frozen=True, slots=True)
+class OutroDeliveryReport:
+    """Best-effort outcome for one chat's ordered terminal content."""
+
+    sent_parts: int
+    failed_parts: int
+    aborted: bool
 
 
 class TelegramDelivery:
     """Send content parts without applying quest or persistence rules."""
 
-    def __init__(self, bot: Bot) -> None:
+    def __init__(
+        self,
+        bot: Bot,
+        *,
+        sleep: SleepCallable = _default_sleep,
+    ) -> None:
         self._bot = bot
+        self._sleep = sleep
 
     async def send_parts(
         self,
@@ -84,22 +115,117 @@ class TelegramDelivery:
 
         assert_never(part.content_type)
 
-    async def send_outro_part(self, chat_id: int, part: ContentPart) -> int:
-        """Send an outbox part and expose only its durable Telegram message ID."""
+    async def send_outro(
+        self,
+        chat_id: int,
+        parts: Iterable[ContentPart],
+    ) -> OutroDeliveryReport:
+        """Send terminal content in order with small, in-memory retries.
 
-        try:
-            message = await self.send_part(chat_id, part)
-        except RetryAfter as error:
-            retry_after = error.retry_after
-            seconds = (
-                retry_after.total_seconds()
-                if isinstance(retry_after, timedelta)
-                else float(retry_after)
-            )
-            raise DeliveryFailure(str(error), retry_after_seconds=max(0.0, seconds)) from error
-        except TelegramError as error:
-            raise DeliveryFailure(str(error)) from error
-        return message.message_id
+        A failed part does not block later parts unless Telegram reports that the
+        bot is forbidden from writing to the chat. Unexpected non-Telegram
+        exceptions intentionally remain visible to the application boundary.
+        """
+
+        sent_parts = 0
+        failed_parts = 0
+        for part_number, part in enumerate(parts, start=1):
+            delivered, aborted = await self._send_outro_part(chat_id, part_number, part)
+            if delivered:
+                sent_parts += 1
+                continue
+            failed_parts += 1
+            if aborted:
+                return OutroDeliveryReport(sent_parts, failed_parts, True)
+
+        return OutroDeliveryReport(sent_parts, failed_parts, False)
+
+    async def _send_outro_part(
+        self,
+        chat_id: int,
+        part_number: int,
+        part: ContentPart,
+    ) -> tuple[bool, bool]:
+        failure: TelegramError | None = None
+        aborted = False
+        attempts = 0
+        for attempts in range(1, OUTRO_MAX_ATTEMPTS + 1):
+            try:
+                await self.send_part(chat_id, part)
+            except Forbidden as error:
+                failure = error
+                aborted = True
+                break
+            except BadRequest as error:
+                # BadRequest inherits NetworkError, but retrying malformed input
+                # or an invalid file ID cannot make it valid.
+                failure = error
+                break
+            except RetryAfter as error:
+                failure = error
+                if attempts < OUTRO_MAX_ATTEMPTS:
+                    await self._sleep(self._retry_after_seconds(error))
+                    continue
+                break
+            except NetworkError as error:
+                failure = error
+                if attempts < OUTRO_MAX_ATTEMPTS:
+                    await self._sleep(float(2 ** (attempts - 1)))
+                    continue
+                break
+            except TelegramError as error:
+                failure = error
+                break
+            else:
+                return True, False
+
+        assert failure is not None
+        self._log_outro_failure(
+            chat_id,
+            part_number,
+            part,
+            attempts,
+            failure,
+            aborted=aborted,
+        )
+        return False, aborted
+
+    @staticmethod
+    def _retry_after_seconds(error: RetryAfter) -> float:
+        retry_after = error.retry_after
+        seconds = (
+            retry_after.total_seconds()
+            if isinstance(retry_after, timedelta)
+            else float(retry_after)
+        )
+        return max(0.0, seconds)
+
+    @staticmethod
+    def _log_outro_failure(
+        chat_id: int,
+        part_number: int,
+        part: ContentPart,
+        attempts: int,
+        error: TelegramError,
+        *,
+        aborted: bool = False,
+    ) -> None:
+        LOGGER.warning(
+            "Terminal content part could not be delivered",
+            exc_info=error,
+            extra={
+                "chat_id": chat_id,
+                "part_number": part_number,
+                "content_type": part.content_type.value,
+                "attempts": attempts,
+                "remaining_parts_aborted": aborted,
+            },
+        )
 
 
-__all__ = ["PLAIN_PARSE_MODE", "TelegramDelivery"]
+__all__ = [
+    "OUTRO_MAX_ATTEMPTS",
+    "PLAIN_PARSE_MODE",
+    "OutroDeliveryReport",
+    "TelegramDelivery",
+]

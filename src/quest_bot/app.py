@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from telegram.ext import AIORateLimiter, ApplicationBuilder, ContextTypes
@@ -16,6 +17,7 @@ from quest_bot.service import QuestService
 LOGGER = logging.getLogger(__name__)
 DEPENDENCIES_KEY = "quest_dependencies"
 SWEEP_INTERVAL_KEY = "quest_sweep_interval"
+OUTRO_CONCURRENCY = 5
 
 
 def _dependencies(application: ApplicationType) -> Dependencies:
@@ -25,30 +27,39 @@ def _dependencies(application: ApplicationType) -> Dependencies:
     return value
 
 
+async def _run_timeout_sweep(deps: Dependencies) -> None:
+    sweep = deps.service.sweep_timeouts()
+    if not sweep.expired_user_ids:
+        return
+    semaphore = asyncio.Semaphore(OUTRO_CONCURRENCY)
+
+    async def deliver(user_id: int) -> tuple[int, int]:
+        async with semaphore:
+            report = await deps.delivery.send_outro(user_id, sweep.outro_parts)
+            return report.sent_parts, report.failed_parts
+
+    reports = await asyncio.gather(*(deliver(user_id) for user_id in sweep.expired_user_ids))
+    LOGGER.info(
+        "Quest timeout sweep completed",
+        extra={
+            "expired_captains": len(sweep.expired_user_ids),
+            "delivered_parts": sum(report[0] for report in reports),
+            "failed_parts": sum(report[1] for report in reports),
+        },
+    )
+
+
 async def _timeout_sweep(context: ContextTypes.DEFAULT_TYPE) -> None:
     value = context.application.bot_data[DEPENDENCIES_KEY]
     if not isinstance(value, Dependencies):
         raise RuntimeError("quest dependencies were not configured")
-    deps = value
-    result = await deps.service.sweep_and_deliver(deps.delivery)
-    if result.expired_captains or result.failed_parts:
-        LOGGER.info(
-            "Quest timeout/outro sweep completed",
-            extra={
-                "expired_captains": result.expired_captains,
-                "delivered_parts": result.delivered_parts,
-                "failed_parts": result.failed_parts,
-            },
-        )
+    await _run_timeout_sweep(value)
 
 
 async def _post_init(application: ApplicationType) -> None:
     deps = _dependencies(application)
-    recovered = deps.service.recover_outro_deliveries()
-    if recovered:
-        LOGGER.warning("Recovered %s interrupted outro part(s)", recovered)
     await application.bot.set_my_commands(COMMANDS)
-    await deps.service.sweep_and_deliver(deps.delivery)
+    await _run_timeout_sweep(deps)
     interval = int(application.bot_data[SWEEP_INTERVAL_KEY])
     if application.job_queue is None:
         raise RuntimeError("PTB JobQueue extra is required")

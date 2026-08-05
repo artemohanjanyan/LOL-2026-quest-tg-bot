@@ -56,29 +56,10 @@ async def set_time_limit(
     await send_text(update, deps, messages.time_limit_updated(saved))
 
 
-async def retry_outro(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    deps: Dependencies,
-) -> None:
-    args = command_args(context)
-    if len(args) != 1:
-        await send_text(update, deps, messages.USAGE_RETRY_OUTRO)
-        return
-    queued = deps.service.retry_outro(actor_id(update), args[0])
-    if not queued:
-        await send_text(update, deps, messages.OUTRO_NOT_FAILED)
-        return
-    await send_text(update, deps, messages.OUTRO_RETRY_QUEUED)
-    await deps.service.sweep_and_deliver(deps.delivery)
-
-
 def build_handlers(deps: Dependencies) -> list[HandlerType]:
     return [
         CommandHandler("set_scores", partial(set_scores, deps=deps)),
         CommandHandler("set_time_limit", partial(set_time_limit, deps=deps)),
-        CommandHandler("retry_outro", partial(retry_outro, deps=deps)),
     ]
 
 

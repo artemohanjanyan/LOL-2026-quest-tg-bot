@@ -21,7 +21,7 @@ from quest_bot.handlers.common import (
     update_id,
     user_data,
 )
-from quest_bot.models import CaptainPosition, UserRole
+from quest_bot.models import CaptainPosition, ContentPart, ContentType, UserRole
 from quest_bot.service import AdvanceResult
 
 _PENDING_SKIP_KEY_PREFIX = "captain:pending-skip-stage:"
@@ -63,12 +63,19 @@ async def _deliver_advance(
     skipped: bool,
 ) -> None:
     _clear_pending_skip(update, context)
+    if result.finished:
+        prefix = (ContentPart(ContentType.TEXT, messages.SKIP_CONFIRMED),) if skipped else ()
+        await deps.delivery.send_outro(
+            chat_id(update),
+            (
+                *prefix,
+                ContentPart(ContentType.TEXT, messages.QUEST_FINISHED),
+                *result.outro_parts,
+            ),
+        )
+        return
     if skipped:
         await send_text(update, deps, messages.SKIP_CONFIRMED)
-    if result.finished:
-        await send_text(update, deps, messages.QUEST_FINISHED)
-        await deps.service.sweep_and_deliver(deps.delivery)
-        return
     if result.presentation is not None:
         await send_stage(update, deps, result.presentation)
 

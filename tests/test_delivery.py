@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import pytest
 from telegram import Bot
 from telegram.warnings import PTBDeprecationWarning
 
 from quest_bot.delivery import TelegramDelivery
-from quest_bot.errors import DeliveryFailure
 from quest_bot.models import ContentPart, ContentType
 from tests.fakes import FakeTelegramRequest
+
+
+@dataclass(slots=True)
+class RecordingSleep:
+    delays: list[float] = field(default_factory=list)
+
+    async def __call__(self, delay: float) -> None:
+        self.delays.append(delay)
 
 
 @pytest.mark.asyncio
@@ -47,10 +56,43 @@ async def test_ordered_delivery_supports_all_quest_content_types(
 
 
 @pytest.mark.asyncio
-async def test_telegram_retry_after_is_exposed_to_durable_outbox(
+async def test_outro_retries_network_error_without_resending_prior_parts(
     telegram_request: FakeTelegramRequest,
 ) -> None:
     bot = Bot("999001:test-token", request=telegram_request)
+    sleep = RecordingSleep()
+    telegram_request.fail_next(
+        "sendDocument",
+        error_code=500,
+        description="Temporary Telegram outage",
+    )
+    parts = (
+        ContentPart(ContentType.TEXT, "The first dispatch"),
+        ContentPart(ContentType.DOCUMENT, "tickets-pdf"),
+        ContentPart(ContentType.VIDEO, "arrival-video"),
+    )
+
+    async with bot:
+        report = await TelegramDelivery(bot, sleep=sleep).send_outro(202, parts)
+
+    assert report.sent_parts == 3
+    assert report.failed_parts == 0
+    assert not report.aborted
+    assert [method for method, _ in telegram_request.calls_to(202)] == [
+        "sendMessage",
+        "sendDocument",
+        "sendDocument",
+        "sendVideo",
+    ]
+    assert sleep.delays == [1]
+
+
+@pytest.mark.asyncio
+async def test_outro_retry_after_uses_exact_injected_sleep(
+    telegram_request: FakeTelegramRequest,
+) -> None:
+    bot = Bot("999001:test-token", request=telegram_request)
+    sleep = RecordingSleep()
     telegram_request.fail_next(
         "sendMessage",
         error_code=429,
@@ -59,13 +101,114 @@ async def test_telegram_retry_after_is_exposed_to_durable_outbox(
     )
 
     async with bot:
-        with (
-            pytest.warns(PTBDeprecationWarning),
-            pytest.raises(DeliveryFailure) as raised,
-        ):
-            await TelegramDelivery(bot).send_outro_part(
+        with pytest.warns(PTBDeprecationWarning):
+            report = await TelegramDelivery(bot, sleep=sleep).send_outro(
                 202,
-                ContentPart(ContentType.TEXT, "final dispatch"),
+                (ContentPart(ContentType.TEXT, "final dispatch"),),
             )
 
-    assert raised.value.retry_after_seconds == 7
+    assert report.sent_parts == 1
+    assert report.failed_parts == 0
+    assert not report.aborted
+    assert sleep.delays == [7]
+    assert [method for method, _ in telegram_request.calls_to(202)] == [
+        "sendMessage",
+        "sendMessage",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_outro_permanent_part_error_continues_with_later_parts(
+    telegram_request: FakeTelegramRequest,
+) -> None:
+    bot = Bot("999001:test-token", request=telegram_request)
+    sleep = RecordingSleep()
+    telegram_request.fail_next(
+        "sendDocument",
+        error_code=400,
+        description="Bad Request: invalid document file ID",
+    )
+
+    async with bot:
+        report = await TelegramDelivery(bot, sleep=sleep).send_outro(
+            202,
+            (
+                ContentPart(ContentType.DOCUMENT, "bad-document"),
+                ContentPart(ContentType.TEXT, "The rest of the outro"),
+            ),
+        )
+
+    assert report.sent_parts == 1
+    assert report.failed_parts == 1
+    assert not report.aborted
+    assert sleep.delays == []
+    assert [method for method, _ in telegram_request.calls_to(202)] == [
+        "sendDocument",
+        "sendMessage",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_outro_exhausts_three_network_attempts_then_continues(
+    telegram_request: FakeTelegramRequest,
+) -> None:
+    bot = Bot("999001:test-token", request=telegram_request)
+    sleep = RecordingSleep()
+    for _ in range(3):
+        telegram_request.fail_next(
+            "sendDocument",
+            error_code=500,
+            description="Temporary Telegram outage",
+        )
+
+    async with bot:
+        report = await TelegramDelivery(bot, sleep=sleep).send_outro(
+            202,
+            (
+                ContentPart(ContentType.DOCUMENT, "unavailable-document"),
+                ContentPart(ContentType.TEXT, "Continue after the document"),
+            ),
+        )
+
+    assert report.sent_parts == 1
+    assert report.failed_parts == 1
+    assert not report.aborted
+    assert sleep.delays == [1, 2]
+    assert [method for method, _ in telegram_request.calls_to(202)] == [
+        "sendDocument",
+        "sendDocument",
+        "sendDocument",
+        "sendMessage",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_outro_forbidden_aborts_without_sending_later_parts(
+    telegram_request: FakeTelegramRequest,
+) -> None:
+    bot = Bot("999001:test-token", request=telegram_request)
+    sleep = RecordingSleep()
+    telegram_request.fail_next(
+        "sendDocument",
+        error_code=403,
+        description="Forbidden: bot was blocked by the user",
+    )
+
+    async with bot:
+        report = await TelegramDelivery(bot, sleep=sleep).send_outro(
+            202,
+            (
+                ContentPart(ContentType.TEXT, "Already delivered"),
+                ContentPart(ContentType.DOCUMENT, "blocked-document"),
+                ContentPart(ContentType.VIDEO, "must-not-be-sent"),
+            ),
+        )
+
+    assert report.sent_parts == 1
+    assert report.failed_parts == 1
+    assert report.aborted
+    assert sleep.delays == []
+    assert [method for method, _ in telegram_request.calls_to(202)] == [
+        "sendMessage",
+        "sendDocument",
+    ]
