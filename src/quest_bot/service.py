@@ -1,0 +1,645 @@
+"""Quest rules and orchestration independent of Telegram update objects."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+from quest_bot.errors import (
+    ContentValidationError,
+    DeliveryFailure,
+    InactiveUser,
+    InvalidQuestState,
+    NotAuthorized,
+    NotFound,
+    QuestNotReady,
+    UnknownUser,
+)
+from quest_bot.models import (
+    AttemptResult,
+    CaptainPosition,
+    CaptainState,
+    CaptainSummary,
+    ContentPart,
+    OutroKind,
+    Stage,
+    TaskAttempt,
+    TaskContent,
+    User,
+    UserRole,
+    utc_now_ms,
+)
+from quest_bot.storage.base import (
+    QuestStore,
+    RecordNotFoundError,
+    StateConflictError,
+    TaskAlreadySolvedError,
+)
+
+LOGGER = logging.getLogger(__name__)
+MAX_TASKS_PER_STAGE = 9
+
+
+class OutroSender(Protocol):
+    async def send_outro_part(self, chat_id: int, part: ContentPart) -> int: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StartResult:
+    state: CaptainState
+    intro_parts: tuple[ContentPart, ...]
+    started: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StagePresentation:
+    stage: Stage
+    tasks: tuple[TaskContent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AdvanceResult:
+    state: CaptainState
+    presentation: StagePresentation | None
+    unsolved_task_numbers: tuple[int, ...]
+    finished: bool
+    applied: bool
+
+    @property
+    def needs_confirmation(self) -> bool:
+        return bool(self.unsolved_task_numbers)
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerResult:
+    attempt: TaskAttempt
+    correct: bool
+    points: int
+    created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StatusSnapshot:
+    user: User
+    state: CaptainState
+    elapsed_seconds: int
+    limit_minutes: int
+    total_score: int
+    stage: Stage | None = None
+    solved_tasks: int = 0
+    total_tasks: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class DeliverySweepResult:
+    expired_captains: int
+    delivered_parts: int
+    failed_parts: int
+
+
+class QuestService:
+    """Concrete application service containing all mutable quest policy."""
+
+    def __init__(
+        self,
+        store: QuestStore,
+        *,
+        clock: Callable[[], int] = utc_now_ms,
+        outro_max_attempts: int = 5,
+        outro_concurrency: int = 5,
+    ) -> None:
+        if outro_max_attempts <= 0:
+            raise ValueError("outro_max_attempts must be positive")
+        if outro_concurrency <= 0:
+            raise ValueError("outro_concurrency must be positive")
+        self.store = store
+        self._clock = clock
+        self._outro_max_attempts = outro_max_attempts
+        self._outro_concurrency = outro_concurrency
+
+    # Authorization ---------------------------------------------------------
+
+    def require_user(self, actor_id: int) -> User:
+        user = self.store.get_user(actor_id)
+        if user is None:
+            raise UnknownUser
+        if not user.active:
+            raise InactiveUser
+        return user
+
+    def require_admin(self, actor_id: int) -> User:
+        user = self.require_user(actor_id)
+        if user.role is not UserRole.ADMIN:
+            raise NotAuthorized
+        return user
+
+    # Captain flow ----------------------------------------------------------
+
+    def start(
+        self,
+        actor_id: int,
+        *,
+        event_at_ms: int,
+        source_update_id: int,
+    ) -> StartResult:
+        self.require_user(actor_id)
+        existing = self.store.ensure_captain_state(actor_id, self._clock())
+        if existing.position is not CaptainPosition.NOT_STARTED:
+            return StartResult(existing, self.store.get_intro_parts(), False)
+        self._assert_quest_ready()
+        transition = self.store.start_captain(
+            actor_id,
+            event_at_ms=event_at_ms,
+            recorded_at_ms=self._clock(),
+            source_update_id=source_update_id,
+        )
+        return StartResult(transition.state, self.store.get_intro_parts(), transition.applied)
+
+    def advance(
+        self,
+        actor_id: int,
+        *,
+        event_at_ms: int,
+        source_update_id: int,
+        confirm_skip: bool = False,
+    ) -> AdvanceResult:
+        self.require_user(actor_id)
+        state = self.store.ensure_captain_state(actor_id, self._clock())
+        if state.position.is_terminal:
+            raise InvalidQuestState("terminal")
+        if state.position is CaptainPosition.NOT_STARTED:
+            raise InvalidQuestState("not_started")
+
+        stages = self.store.list_stages()
+        if not stages:
+            raise QuestNotReady("no stages")
+
+        unsolved: tuple[int, ...] = ()
+        skipped = False
+        next_stage: Stage | None
+        if state.position is CaptainPosition.INTRO:
+            next_stage = stages[0]
+        else:
+            assert state.current_stage_number is not None
+            progress = self.store.get_stage_progress(actor_id, state.current_stage_number)
+            unsolved = tuple(item.task.task_number for item in progress if not item.solved)
+            if unsolved and not confirm_skip:
+                return AdvanceResult(state, None, unsolved, False, False)
+            skipped = bool(unsolved)
+            next_stage = next(
+                (stage for stage in stages if stage.stage_number > state.current_stage_number),
+                None,
+            )
+
+        if next_stage is None:
+            target_position = CaptainPosition.FINISHED
+            target_stage_number = None
+        else:
+            target_position = CaptainPosition.STAGE
+            target_stage_number = next_stage.stage_number
+
+        try:
+            transition = self.store.transition_captain(
+                actor_id,
+                expected_position=state.position,
+                expected_stage_number=state.current_stage_number,
+                target_position=target_position,
+                target_stage_number=target_stage_number,
+                event_at_ms=event_at_ms,
+                recorded_at_ms=self._clock(),
+                source_update_id=source_update_id,
+                skipped_unsolved_tasks=skipped,
+            )
+        except StateConflictError as error:
+            raise InvalidQuestState("position changed") from error
+
+        if not transition.applied:
+            if transition.transition is None:
+                raise InvalidQuestState("position changed")
+            actual_state = transition.state
+            actual_presentation = (
+                self._presentation(actual_state.current_stage_number)
+                if actual_state.position is CaptainPosition.STAGE
+                and actual_state.current_stage_number is not None
+                else None
+            )
+            return AdvanceResult(
+                actual_state,
+                actual_presentation,
+                (),
+                actual_state.position is CaptainPosition.FINISHED,
+                False,
+            )
+
+        presentation = (
+            self._presentation(target_stage_number) if target_stage_number is not None else None
+        )
+        return AdvanceResult(
+            transition.state,
+            presentation,
+            (),
+            target_position is CaptainPosition.FINISHED,
+            transition.applied,
+        )
+
+    def answer(
+        self,
+        actor_id: int,
+        task_number: int,
+        raw_answer: str,
+        *,
+        event_at_ms: int,
+        source_update_id: int,
+    ) -> AnswerResult:
+        self.require_user(actor_id)
+        if task_number <= 0 or not raw_answer.strip():
+            raise ContentValidationError("invalid answer")
+        state = self.store.ensure_captain_state(actor_id, self._clock())
+        if state.position.is_terminal:
+            raise InvalidQuestState("terminal")
+        if state.position is not CaptainPosition.STAGE or state.current_stage_number is None:
+            raise InvalidQuestState("answers require a stage")
+        task = self.store.get_task(state.current_stage_number, task_number)
+        if task is None:
+            raise NotFound("task")
+        try:
+            stored: AttemptResult = self.store.record_attempt(
+                actor_id,
+                state.current_stage_number,
+                task_number,
+                raw_answer,
+                event_at_ms=event_at_ms,
+                recorded_at_ms=self._clock(),
+                source_update_id=source_update_id,
+            )
+        except TaskAlreadySolvedError as error:
+            raise InvalidQuestState("task already solved") from error
+        except (RecordNotFoundError, StateConflictError) as error:
+            raise InvalidQuestState("position changed") from error
+
+        correct = stored.attempt.normalized_answer == task.task.correct_answer_normalized
+        score_steps = self.store.get_score_steps()
+        index = stored.attempt.attempt_number - 1
+        points = score_steps[index] if correct and index < len(score_steps) else 0
+        return AnswerResult(stored.attempt, correct, points, stored.created)
+
+    def get_stage(self, actor_id: int) -> StagePresentation:
+        self.require_user(actor_id)
+        state = self.store.ensure_captain_state(actor_id, self._clock())
+        if state.position is not CaptainPosition.STAGE or state.current_stage_number is None:
+            raise InvalidQuestState("no current stage")
+        return self._presentation(state.current_stage_number)
+
+    def get_intro(self, actor_id: int) -> tuple[ContentPart, ...]:
+        self.require_user(actor_id)
+        state = self.store.ensure_captain_state(actor_id, self._clock())
+        if state.position is not CaptainPosition.INTRO:
+            raise InvalidQuestState("not at intro")
+        return self.store.get_intro_parts()
+
+    def status(self, actor_id: int, *, now_ms: int | None = None) -> StatusSnapshot:
+        user = self.require_user(actor_id)
+        return self._status_snapshot(user, now_ms=now_ms)
+
+    def _status_snapshot(self, user: User, *, now_ms: int | None = None) -> StatusSnapshot:
+        now = self._clock() if now_ms is None else now_ms
+        state = self.store.ensure_captain_state(user.user_id, now)
+        settings = self.store.get_settings()
+        limit = (
+            state.timeout_limit_minutes
+            if state.position is CaptainPosition.TIMED_OUT
+            and state.timeout_limit_minutes is not None
+            else settings.time_limit_minutes
+        )
+        elapsed = 0
+        if state.started_at_ms is not None:
+            end = state.terminal_at_ms if state.terminal_at_ms is not None else now
+            elapsed = max(0, (end - state.started_at_ms) // 1_000)
+        stage = None
+        solved = 0
+        total = 0
+        if state.position is CaptainPosition.STAGE and state.current_stage_number is not None:
+            stage = self.store.get_stage(state.current_stage_number)
+            progress = self.store.get_stage_progress(user.user_id, state.current_stage_number)
+            solved = sum(item.solved for item in progress)
+            total = len(progress)
+        return StatusSnapshot(
+            user=user,
+            state=state,
+            elapsed_seconds=elapsed,
+            limit_minutes=limit,
+            total_score=self.store.get_total_score(user.user_id),
+            stage=stage,
+            solved_tasks=solved,
+            total_tasks=total,
+        )
+
+    # Administration --------------------------------------------------------
+
+    def add_captain(
+        self, actor_id: int, user_id: int, username: str, *, now_ms: int | None = None
+    ) -> User:
+        self.require_admin(actor_id)
+        self._validate_identity(user_id, username)
+        now = self._clock() if now_ms is None else now_ms
+        return self.store.add_captain(user_id, username.lstrip("@"), now)
+
+    def remove_captain(self, actor_id: int, user_id: int, *, now_ms: int | None = None) -> bool:
+        self.require_admin(actor_id)
+        target = self.store.get_user(user_id)
+        if target is None or target.role is not UserRole.CAPTAIN:
+            return False
+        now = self._clock() if now_ms is None else now_ms
+        return self.store.deactivate_captain(user_id, now)
+
+    def list_users(self, actor_id: int) -> tuple[User, ...]:
+        self.require_admin(actor_id)
+        return self.store.list_users(include_inactive=True)
+
+    def replace_intro(self, actor_id: int, parts: Sequence[ContentPart]) -> None:
+        self.require_admin(actor_id)
+        self._validate_parts(parts)
+        self.store.replace_intro_parts(parts)
+
+    def replace_outro(self, actor_id: int, kind: OutroKind, parts: Sequence[ContentPart]) -> None:
+        self.require_admin(actor_id)
+        self._validate_parts(parts)
+        self.store.replace_outro_parts(kind, parts)
+
+    def set_stage(
+        self,
+        actor_id: int,
+        stage_number: int,
+        name: str,
+        *,
+        now_ms: int | None = None,
+    ) -> Stage:
+        self.require_admin(actor_id)
+        if stage_number <= 0 or not name.strip():
+            raise ContentValidationError("invalid stage")
+        now = self._clock() if now_ms is None else now_ms
+        return self.store.set_stage(stage_number, name.strip(), now)
+
+    def set_task(
+        self,
+        actor_id: int,
+        stage_number: int,
+        task_number: int,
+        correct_answer: str,
+        prompt_parts: Sequence[ContentPart],
+        *,
+        now_ms: int | None = None,
+    ) -> TaskContent:
+        self.require_admin(actor_id)
+        if stage_number <= 0 or task_number <= 0 or not correct_answer.strip():
+            raise ContentValidationError("invalid task")
+        self._validate_parts(prompt_parts)
+        if self.store.get_stage(stage_number) is None:
+            raise NotFound("stage")
+        existing = self.store.get_task(stage_number, task_number)
+        if (
+            existing is None
+            and len(self.store.list_stage_tasks(stage_number)) >= MAX_TASKS_PER_STAGE
+        ):
+            raise ContentValidationError("too many tasks")
+        now = self._clock() if now_ms is None else now_ms
+        return self.store.set_task(
+            stage_number,
+            task_number,
+            correct_answer,
+            prompt_parts,
+            now,
+        )
+
+    def delete_stage(self, actor_id: int, stage_number: int) -> bool:
+        self.require_admin(actor_id)
+        return self.store.delete_stage(stage_number)
+
+    def delete_task(self, actor_id: int, stage_number: int, task_number: int) -> bool:
+        self.require_admin(actor_id)
+        return self.store.delete_task(stage_number, task_number)
+
+    def list_stages(self, actor_id: int) -> tuple[Stage, ...]:
+        self.require_admin(actor_id)
+        return self.store.list_stages()
+
+    def show_stage(self, actor_id: int, stage_number: int) -> StagePresentation:
+        self.require_admin(actor_id)
+        return self._presentation(stage_number)
+
+    def show_task(self, actor_id: int, stage_number: int, task_number: int) -> TaskContent:
+        self.require_admin(actor_id)
+        task = self.store.get_task(stage_number, task_number)
+        if task is None:
+            raise NotFound("task")
+        return task
+
+    def get_intro_for_admin(self, actor_id: int) -> tuple[ContentPart, ...]:
+        self.require_admin(actor_id)
+        return self.store.get_intro_parts()
+
+    def get_outro_for_admin(self, actor_id: int, kind: OutroKind) -> tuple[ContentPart, ...]:
+        self.require_admin(actor_id)
+        return self.store.get_outro_parts(kind)
+
+    def set_scores(self, actor_id: int, points: Sequence[int]) -> tuple[int, ...]:
+        self.require_admin(actor_id)
+        if not points or any(point < 0 for point in points):
+            raise ContentValidationError("invalid scores")
+        return self.store.set_score_steps(points)
+
+    def set_time_limit(self, actor_id: int, minutes: int) -> int:
+        self.require_admin(actor_id)
+        if minutes <= 0:
+            raise ContentValidationError("invalid time limit")
+        return self.store.set_time_limit(minutes, self._clock()).time_limit_minutes
+
+    def leaderboard(self, actor_id: int) -> tuple[CaptainSummary, ...]:
+        self.require_admin(actor_id)
+        summaries = self.store.list_captain_summaries()
+        return tuple(
+            sorted(
+                summaries,
+                key=lambda item: (
+                    -item.total_score,
+                    item.state.terminal_at_ms is None,
+                    item.state.terminal_at_ms or 0,
+                    item.user.username.casefold(),
+                ),
+            )
+        )
+
+    def captain_status(self, actor_id: int, reference: str) -> StatusSnapshot:
+        self.require_admin(actor_id)
+        target = self.resolve_user(reference)
+        return self._status_snapshot(target)
+
+    def captain_attempts(
+        self,
+        actor_id: int,
+        reference: str,
+        *,
+        stage_number: int | None = None,
+    ) -> tuple[TaskAttempt, ...]:
+        self.require_admin(actor_id)
+        target = self.resolve_user(reference)
+        return self.store.list_attempts(target.user_id, stage_number=stage_number)
+
+    def resolve_user(self, reference: str) -> User:
+        cleaned = reference.strip().lstrip("@")
+        user = self.store.get_user(int(cleaned)) if cleaned.isdecimal() else None
+        if user is None and cleaned:
+            user = self.store.get_user_by_username(cleaned)
+        if user is None:
+            raise NotFound("captain")
+        return user
+
+    def active_recipients(self, actor_id: int) -> tuple[User, ...]:
+        self.require_admin(actor_id)
+        return tuple(
+            user
+            for user in self.store.list_users(include_inactive=False)
+            if user.role is UserRole.CAPTAIN
+        )
+
+    def retry_outro(self, actor_id: int, reference: str) -> bool:
+        self.require_admin(actor_id)
+        target = self.resolve_user(reference)
+        return self.store.retry_outro_for_user(target.user_id, self._clock())
+
+    # Timeout and durable outro delivery -----------------------------------
+
+    def recover_outro_deliveries(self) -> int:
+        return self.store.recover_interrupted_outro_deliveries(self._clock())
+
+    async def sweep_and_deliver(self, sender: OutroSender) -> DeliverySweepResult:
+        now = self._clock()
+        expired = self.store.claim_overdue_captains(now)
+        delivered = 0
+        failed = 0
+        semaphore = asyncio.Semaphore(self._outro_concurrency)
+
+        async def deliver_one(work_index: int) -> tuple[int, int]:
+            work = ready[work_index]
+            async with semaphore:
+                attempted_at = self._clock()
+                claimed = self.store.mark_outro_part_sending(
+                    work.delivery.delivery_id,
+                    work.part.part_number,
+                    attempted_at,
+                )
+                if not claimed:
+                    return (0, 0)
+                try:
+                    message_id = await sender.send_outro_part(
+                        work.delivery.user_id, work.part.content
+                    )
+                except DeliveryFailure as error:
+                    delay = self._retry_delay_ms(
+                        work.part.attempt_count + 1,
+                        error.retry_after_seconds,
+                    )
+                    self.store.mark_outro_part_failed(
+                        work.delivery.delivery_id,
+                        work.part.part_number,
+                        error=str(error),
+                        failed_at_ms=self._clock(),
+                        next_attempt_at_ms=self._clock() + delay,
+                        max_attempts=self._outro_max_attempts,
+                    )
+                    return (0, 1)
+                except Exception as error:  # noqa: BLE001 - delivery must remain durable
+                    LOGGER.exception(
+                        "Unexpected outro delivery error",
+                        extra={
+                            "delivery_id": work.delivery.delivery_id,
+                            "part_number": work.part.part_number,
+                        },
+                    )
+                    delay = self._retry_delay_ms(work.part.attempt_count + 1, None)
+                    self.store.mark_outro_part_failed(
+                        work.delivery.delivery_id,
+                        work.part.part_number,
+                        error=repr(error),
+                        failed_at_ms=self._clock(),
+                        next_attempt_at_ms=self._clock() + delay,
+                        max_attempts=self._outro_max_attempts,
+                    )
+                    return (0, 1)
+                self.store.mark_outro_part_delivered(
+                    work.delivery.delivery_id,
+                    work.part.part_number,
+                    telegram_message_id=message_id,
+                    delivered_at_ms=self._clock(),
+                )
+                return (1, 0)
+
+        # Only the earliest unfinished part of a delivery is claimable. Looping
+        # lets all parts drain in order while different captains run concurrently.
+        while True:
+            ready = self.store.list_ready_outro_work(
+                self._clock(),
+                max_attempts=self._outro_max_attempts,
+                limit=100,
+            )
+            if not ready:
+                break
+            outcomes = await asyncio.gather(*(deliver_one(index) for index in range(len(ready))))
+            delivered += sum(item[0] for item in outcomes)
+            failed += sum(item[1] for item in outcomes)
+            if delivered == 0 and failed:
+                break
+        return DeliverySweepResult(len(expired), delivered, failed)
+
+    # Internal helpers ------------------------------------------------------
+
+    def _assert_quest_ready(self) -> None:
+        stages = self.store.list_stages()
+        ready = (
+            bool(self.store.get_intro_parts())
+            and bool(self.store.get_outro_parts(OutroKind.SUCCESS))
+            and bool(self.store.get_outro_parts(OutroKind.TIMEOUT))
+            and bool(stages)
+            and all(bool(self.store.list_stage_tasks(stage.stage_number)) for stage in stages)
+        )
+        if not ready:
+            raise QuestNotReady
+
+    def _presentation(self, stage_number: int) -> StagePresentation:
+        stage = self.store.get_stage(stage_number)
+        if stage is None:
+            raise NotFound("stage")
+        return StagePresentation(stage, self.store.list_stage_tasks(stage_number))
+
+    @staticmethod
+    def _validate_parts(parts: Sequence[ContentPart]) -> None:
+        if not parts or any(not part.data for part in parts):
+            raise ContentValidationError("content must have at least one part")
+
+    @staticmethod
+    def _validate_identity(user_id: int, username: str) -> None:
+        if user_id <= 0 or not username.strip().lstrip("@"):
+            raise ContentValidationError("invalid captain")
+
+    @staticmethod
+    def _retry_delay_ms(attempt_number: int, retry_after_seconds: float | None) -> int:
+        if retry_after_seconds is not None:
+            return max(1_000, int(retry_after_seconds * 1_000))
+        exponent: int = max(0, attempt_number - 1)
+        return min(60_000, (1 << exponent) * 1_000)
+
+
+__all__ = [
+    "AdvanceResult",
+    "AnswerResult",
+    "DeliverySweepResult",
+    "MAX_TASKS_PER_STAGE",
+    "OutroSender",
+    "QuestService",
+    "StagePresentation",
+    "StartResult",
+    "StatusSnapshot",
+]

@@ -1,0 +1,50 @@
+[project]
+name = "lol-2026-quest-tg-bot"
+version = "0.1.0"
+description = "Telegram bot for the LOL 2026 online quest"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "python-dotenv>=1,<2",
+    "python-telegram-bot[job-queue,rate-limiter]>=22.8,<23",
+]
+
+[project.scripts]
+lol-2026-quest-bot = "quest_bot.__main__:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18,<2",
+    "pre-commit>=4.3,<5",
+    "pytest>=8.4,<9",
+    "pytest-asyncio>=1.1,<2",
+    "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "quest_bot"
+module-root = "src"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+strict = true
+warn_unreachable = true
+pretty = true
+show_error_codes = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
