@@ -74,6 +74,34 @@ def command_args(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
     return context.args or []
 
 
+def parse_integer_args(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    count: int | None = None,
+) -> tuple[int, ...] | None:
+    args = command_args(context)
+    if count is not None and len(args) != count:
+        return None
+    try:
+        return tuple(int(value) for value in args)
+    except ValueError:
+        return None
+
+
+def parse_numbered_text(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> tuple[int, str] | None:
+    args = command_args(context)
+    if len(args) < 2:
+        return None
+    try:
+        number = int(args[0])
+    except ValueError:
+        return None
+    text = " ".join(args[1:])
+    return (number, text) if text.strip() else None
+
+
 def user_data(context: ContextTypes.DEFAULT_TYPE) -> dict[Any, Any]:
     data = context.user_data
     if data is None:
@@ -100,7 +128,7 @@ async def send_stage(update: Update, deps: Dependencies, presentation: StagePres
             update,
             deps,
             messages.task_heading(
-                task.task.task_number,
+                task.task_number,
                 presentation.stage.name,
                 ordinal,
                 total,
@@ -222,21 +250,3 @@ def register_error_handler(
     deps: Dependencies,
 ) -> None:
     application.add_error_handler(partial(handle_error, deps=deps))
-
-
-__all__ = [
-    "ApplicationType",
-    "Dependencies",
-    "HandlerType",
-    "actor_id",
-    "chat_id",
-    "command_args",
-    "content_part_from_message",
-    "event_at_ms",
-    "register_error_handler",
-    "render_status",
-    "send_stage",
-    "send_text",
-    "update_id",
-    "user_data",
-]

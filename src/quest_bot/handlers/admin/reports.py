@@ -25,7 +25,6 @@ async def leaderboard(
     *,
     deps: Dependencies,
 ) -> None:
-    del context
     rows = deps.service.leaderboard(actor_id(update))
     if not rows:
         await send_text(update, deps, "У таблиці ще немає капітанів.")
@@ -61,21 +60,15 @@ async def progress(
     prefix = f"Капітан @{snapshot.user.username}\n"
     text = render_status(snapshot)
     if snapshot.state.position is CaptainPosition.STAGE:
-        attempts = deps.service.captain_attempts(
+        stage_number = snapshot.state.current_stage_number
+        assert stage_number is not None
+        attempt_counts = deps.service.captain_attempt_counts(
             actor_id(update),
             args[0],
-            stage_number=snapshot.state.current_stage_number,
+            stage_number=stage_number,
         )
-        attempt_counts: dict[int, int] = {}
-        for attempt in attempts:
-            attempt_counts[attempt.task_number] = max(
-                attempt_counts.get(attempt.task_number, 0),
-                attempt.attempt_number,
-            )
         if attempt_counts:
-            rendered = ", ".join(
-                f"№{number}: {count} спроб" for number, count in sorted(attempt_counts.items())
-            )
+            rendered = ", ".join(f"№{number}: {count} спроб" for number, count in attempt_counts)
             text = f"{text}\nСпроби на цьому етапі: {rendered}"
     await send_text(update, deps, prefix + text)
 
@@ -85,6 +78,3 @@ def build_handlers(deps: Dependencies) -> list[HandlerType]:
         CommandHandler("leaderboard", partial(leaderboard, deps=deps)),
         CommandHandler("progress", partial(progress, deps=deps)),
     ]
-
-
-__all__ = ["build_handlers"]

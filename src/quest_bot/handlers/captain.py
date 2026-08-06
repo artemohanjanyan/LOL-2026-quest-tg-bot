@@ -13,8 +13,8 @@ from quest_bot.handlers.common import (
     HandlerType,
     actor_id,
     chat_id,
-    command_args,
     event_at_ms,
+    parse_numbered_text,
     render_status,
     send_stage,
     send_text,
@@ -168,15 +168,12 @@ async def answer(
     *,
     deps: Dependencies,
 ) -> None:
-    try:
-        task_number_text, *answer_parts = command_args(context)
-        task_number = int(task_number_text)
-    except (TypeError, ValueError):
+    parsed = parse_numbered_text(context)
+    if parsed is None:
         await send_text(update, deps, messages.USAGE_ANSWER)
         return
-
-    raw_answer = " ".join(answer_parts)
-    if task_number <= 0 or not raw_answer.strip():
+    task_number, raw_answer = parsed
+    if task_number <= 0:
         await send_text(update, deps, messages.USAGE_ANSWER)
         return
 
@@ -190,7 +187,7 @@ async def answer(
     if result.correct:
         text = messages.answer_correct(points=result.points)
     else:
-        text = messages.answer_incorrect(attempt_number=result.attempt.attempt_number)
+        text = messages.answer_incorrect(attempt_number=result.attempt_number)
     await send_text(update, deps, text)
 
 
@@ -200,7 +197,6 @@ async def status(
     *,
     deps: Dependencies,
 ) -> None:
-    del context
     await send_text(
         update,
         deps,
@@ -214,7 +210,6 @@ async def stage(
     *,
     deps: Dependencies,
 ) -> None:
-    del context
     captain_id = actor_id(update)
     snapshot = deps.service.status(captain_id)
     if snapshot.state.position is CaptainPosition.INTRO:
@@ -235,7 +230,6 @@ async def help_command(
     *,
     deps: Dependencies,
 ) -> None:
-    del context
     user = deps.service.require_user(actor_id(update))
     await send_text(
         update,
@@ -277,6 +271,3 @@ def build_handlers(
         CommandHandler("help", partial(help_command, deps=deps)),
         CommandHandler("cancel", partial(cancel, deps=deps)),
     ]
-
-
-__all__ = ["build_handlers"]

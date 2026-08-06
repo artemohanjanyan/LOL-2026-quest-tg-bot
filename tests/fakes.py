@@ -19,7 +19,6 @@ class FakeTelegramRequest(BaseRequest):
         "sendVideo",
         "sendVideoNote",
     }
-    CONTROL_METHODS = {"setMyCommands"}
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -52,7 +51,6 @@ class FakeTelegramRequest(BaseRequest):
         connect_timeout: Any = BaseRequest.DEFAULT_NONE,
         pool_timeout: Any = BaseRequest.DEFAULT_NONE,
     ) -> tuple[int, bytes]:
-        del method, read_timeout, write_timeout, connect_timeout, pool_timeout
         api_method = url.rsplit("/", maxsplit=1)[-1]
         parameters = dict(request_data.parameters) if request_data is not None else {}
         self.calls.append((api_method, parameters))
@@ -65,71 +63,22 @@ class FakeTelegramRequest(BaseRequest):
         if api_method == "getMe":
             result: Any = self._bot_user
         elif api_method in self.SEND_METHODS:
-            result = self._sent_message(api_method, parameters)
-        elif api_method in self.CONTROL_METHODS:
+            result = self._sent_message(parameters)
+        elif api_method == "setMyCommands":
             result = True
         else:
             raise AssertionError(f"Unexpected Bot API method: {api_method}")
 
         return 200, json.dumps({"ok": True, "result": result}).encode()
 
-    def _sent_message(self, method: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    def _sent_message(self, parameters: dict[str, Any]) -> dict[str, Any]:
         self._next_message_id += 1
-        result: dict[str, Any] = {
+        return {
             "message_id": self._next_message_id,
             "date": 1_754_000_000,
             "chat": {"id": parameters["chat_id"], "type": "private"},
             "from": self._bot_user,
         }
-        caption = parameters.get("caption")
-        if caption is not None:
-            result["caption"] = caption
-
-        if method == "sendMessage":
-            result["text"] = parameters["text"]
-        elif method == "sendPhoto":
-            result["photo"] = [
-                {
-                    **self._file(parameters.get("photo", "photo")),
-                    "width": 640,
-                    "height": 360,
-                }
-            ]
-        elif method == "sendSticker":
-            result["sticker"] = {
-                **self._file(parameters.get("sticker", "sticker")),
-                "type": "regular",
-                "width": 512,
-                "height": 512,
-                "is_animated": False,
-                "is_video": False,
-            }
-        elif method == "sendVoice":
-            result["voice"] = {
-                **self._file(parameters.get("voice", "voice")),
-                "duration": 1,
-            }
-        elif method == "sendDocument":
-            result["document"] = self._file(parameters.get("document", "document"))
-        elif method == "sendVideo":
-            result["video"] = {
-                **self._file(parameters.get("video", "video")),
-                "duration": 1,
-                "width": 640,
-                "height": 360,
-            }
-        elif method == "sendVideoNote":
-            result["video_note"] = {
-                **self._file(parameters.get("video_note", "video_note")),
-                "duration": 1,
-                "length": 360,
-            }
-        return result
-
-    @staticmethod
-    def _file(value: Any) -> dict[str, Any]:
-        file_id = value if isinstance(value, str) else "uploaded-test-file"
-        return {"file_id": file_id, "file_unique_id": f"unique-{file_id}"}
 
     def calls_to(self, user_id: int) -> list[tuple[str, dict[str, Any]]]:
         return [
@@ -189,19 +138,10 @@ class TelegramUser:
         self,
         *,
         text: str | None = None,
-        photo: str | None = None,
-        sticker: str | None = None,
-        voice: str | None = None,
         document: str | None = None,
-        video: str | None = None,
-        video_note: str | None = None,
         caption: str | None = None,
     ) -> None:
-        supplied = [
-            value is not None
-            for value in (text, photo, sticker, voice, document, video, video_note)
-        ]
-        if sum(supplied) != 1:
+        if (text is None) == (document is None):
             raise ValueError("Supply exactly one supported content value")
 
         self._next_update_id += 1
@@ -227,50 +167,10 @@ class TelegramUser:
             if text.startswith("/"):
                 command = text.split(maxsplit=1)[0]
                 message["entities"] = [{"type": "bot_command", "offset": 0, "length": len(command)}]
-        elif photo is not None:
-            message["photo"] = [
-                {
-                    "file_id": photo,
-                    "file_unique_id": f"unique-{photo}",
-                    "width": 640,
-                    "height": 360,
-                }
-            ]
-        elif sticker is not None:
-            message["sticker"] = {
-                "file_id": sticker,
-                "file_unique_id": f"unique-{sticker}",
-                "type": "regular",
-                "width": 512,
-                "height": 512,
-                "is_animated": False,
-                "is_video": False,
-            }
-        elif voice is not None:
-            message["voice"] = {
-                "file_id": voice,
-                "file_unique_id": f"unique-{voice}",
-                "duration": 1,
-            }
         elif document is not None:
             message["document"] = {
                 "file_id": document,
                 "file_unique_id": f"unique-{document}",
-            }
-        elif video is not None:
-            message["video"] = {
-                "file_id": video,
-                "file_unique_id": f"unique-{video}",
-                "duration": 1,
-                "width": 640,
-                "height": 360,
-            }
-        elif video_note is not None:
-            message["video_note"] = {
-                "file_id": video_note,
-                "file_unique_id": f"unique-{video_note}",
-                "duration": 1,
-                "length": 360,
             }
         if caption is not None:
             message["caption"] = caption

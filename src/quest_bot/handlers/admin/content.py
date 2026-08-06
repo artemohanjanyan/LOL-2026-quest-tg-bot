@@ -25,6 +25,8 @@ from quest_bot.handlers.common import (
     chat_id,
     command_args,
     content_part_from_message,
+    parse_integer_args,
+    parse_numbered_text,
     send_stage,
     send_text,
     user_data,
@@ -86,30 +88,6 @@ async def _begin(
     return DRAFT_CONTENT
 
 
-async def begin_intro(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, *, deps: Dependencies
-) -> int:
-    return await _begin(update, context, deps=deps, kind=DraftKind.INTRO)
-
-
-async def begin_success_outro(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, *, deps: Dependencies
-) -> int:
-    return await _begin(update, context, deps=deps, kind=DraftKind.SUCCESS_OUTRO)
-
-
-async def begin_timeout_outro(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, *, deps: Dependencies
-) -> int:
-    return await _begin(update, context, deps=deps, kind=DraftKind.TIMEOUT_OUTRO)
-
-
-async def begin_broadcast(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, *, deps: Dependencies
-) -> int:
-    return await _begin(update, context, deps=deps, kind=DraftKind.BROADCAST)
-
-
 async def begin_task(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -117,15 +95,11 @@ async def begin_task(
     deps: Dependencies,
 ) -> int:
     deps.service.require_admin(actor_id(update))
-    args = command_args(context)
-    if len(args) != 2:
+    numbers = parse_integer_args(context, count=2)
+    if numbers is None:
         await send_text(update, deps, messages.USAGE_SET_TASK)
         return ConversationHandler.END
-    try:
-        stage_number, task_number = (int(value) for value in args)
-    except ValueError:
-        await send_text(update, deps, messages.USAGE_SET_TASK)
-        return ConversationHandler.END
+    stage_number, task_number = numbers
     if stage_number <= 0 or task_number <= 0:
         await send_text(update, deps, messages.USAGE_SET_TASK)
         return ConversationHandler.END
@@ -273,17 +247,13 @@ async def set_stage(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if len(args) < 2:
+    parsed = parse_numbered_text(context)
+    if parsed is None:
         await send_text(update, deps, messages.USAGE_SET_STAGE)
         return
+    number, name = parsed
     try:
-        number = int(args[0])
-    except ValueError:
-        await send_text(update, deps, messages.USAGE_SET_STAGE)
-        return
-    try:
-        stage = deps.service.set_stage(actor_id(update), number, " ".join(args[1:]))
+        stage = deps.service.set_stage(actor_id(update), number, name)
     except ContentValidationError:
         await send_text(update, deps, messages.USAGE_SET_STAGE)
         return
@@ -296,15 +266,11 @@ async def delete_stage(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if len(args) != 1:
+    numbers = parse_integer_args(context, count=1)
+    if numbers is None:
         await send_text(update, deps, messages.USAGE_DELETE_STAGE)
         return
-    try:
-        number = int(args[0])
-    except ValueError:
-        await send_text(update, deps, messages.USAGE_DELETE_STAGE)
-        return
+    (number,) = numbers
     deleted = deps.service.delete_stage(actor_id(update), number)
     await send_text(
         update,
@@ -319,15 +285,11 @@ async def delete_task(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if len(args) != 2:
+    numbers = parse_integer_args(context, count=2)
+    if numbers is None:
         await send_text(update, deps, messages.USAGE_DELETE_TASK)
         return
-    try:
-        stage_number, task_number = (int(value) for value in args)
-    except ValueError:
-        await send_text(update, deps, messages.USAGE_DELETE_TASK)
-        return
+    stage_number, task_number = numbers
     deleted = deps.service.delete_task(actor_id(update), stage_number, task_number)
     await send_text(update, deps, messages.CONTENT_DELETED if deleted else messages.TASK_NOT_FOUND)
 
@@ -338,7 +300,6 @@ async def list_stages(
     *,
     deps: Dependencies,
 ) -> None:
-    del context
     stages = deps.service.list_stages(actor_id(update))
     if not stages:
         await send_text(update, deps, messages.NO_STAGES)
@@ -356,23 +317,18 @@ async def show_stage(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if len(args) != 1:
+    numbers = parse_integer_args(context, count=1)
+    if numbers is None:
         await send_text(update, deps, messages.USAGE_SHOW_STAGE)
         return
-    try:
-        stage_number = int(args[0])
-    except ValueError:
-        await send_text(update, deps, messages.USAGE_SHOW_STAGE)
-        return
+    (stage_number,) = numbers
     presentation = deps.service.show_stage(actor_id(update), stage_number)
     await send_stage(update, deps, presentation)
     for task in presentation.tasks:
         await send_text(
             update,
             deps,
-            f"Правильна відповідь до завдання {task.task.task_number}: "
-            f"{task.task.correct_answer_raw}",
+            f"Правильна відповідь до завдання {task.task_number}: {task.correct_answer_raw}",
         )
 
 
@@ -382,21 +338,17 @@ async def show_task(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if len(args) != 2:
+    numbers = parse_integer_args(context, count=2)
+    if numbers is None:
         await send_text(update, deps, messages.USAGE_SHOW_TASK)
         return
-    try:
-        stage_number, task_number = (int(value) for value in args)
-    except ValueError:
-        await send_text(update, deps, messages.USAGE_SHOW_TASK)
-        return
+    stage_number, task_number = numbers
     task = deps.service.show_task(actor_id(update), stage_number, task_number)
     await send_text(
         update,
         deps,
         f"Етап {stage_number}, завдання {task_number}.\n"
-        f"Правильна відповідь: {task.task.correct_answer_raw}",
+        f"Правильна відповідь: {task.correct_answer_raw}",
     )
     await deps.delivery.send_parts(chat_id(update), task.prompt_parts)
 
@@ -408,7 +360,6 @@ async def show_global_content(
     deps: Dependencies,
     kind: DraftKind,
 ) -> None:
-    del context
     admin_id = actor_id(update)
     if kind is DraftKind.INTRO:
         parts = deps.service.get_intro_for_admin(admin_id)
@@ -425,11 +376,23 @@ async def show_global_content(
 def build_handlers(deps: Dependencies) -> list[HandlerType]:
     conversation = ConversationHandler(
         entry_points=[
-            CommandHandler("set_intro", partial(begin_intro, deps=deps)),
-            CommandHandler("set_success_outro", partial(begin_success_outro, deps=deps)),
-            CommandHandler("set_timeout_outro", partial(begin_timeout_outro, deps=deps)),
+            CommandHandler(
+                "set_intro",
+                partial(_begin, deps=deps, kind=DraftKind.INTRO),
+            ),
+            CommandHandler(
+                "set_success_outro",
+                partial(_begin, deps=deps, kind=DraftKind.SUCCESS_OUTRO),
+            ),
+            CommandHandler(
+                "set_timeout_outro",
+                partial(_begin, deps=deps, kind=DraftKind.TIMEOUT_OUTRO),
+            ),
             CommandHandler("set_task", partial(begin_task, deps=deps)),
-            CommandHandler("broadcast", partial(begin_broadcast, deps=deps)),
+            CommandHandler(
+                "broadcast",
+                partial(_begin, deps=deps, kind=DraftKind.BROADCAST),
+            ),
         ],
         states={
             DRAFT_CONTENT: [
@@ -466,6 +429,3 @@ def build_handlers(deps: Dependencies) -> list[HandlerType]:
             partial(show_global_content, deps=deps, kind=DraftKind.TIMEOUT_OUTRO),
         ),
     ]
-
-
-__all__ = ["build_handlers"]

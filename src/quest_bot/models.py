@@ -53,8 +53,6 @@ class User:
     username: str
     role: UserRole
     active: bool
-    created_at_ms: int
-    updated_at_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,17 +63,9 @@ class ContentPart:
 
 
 @dataclass(frozen=True, slots=True)
-class QuestSettings:
-    time_limit_minutes: int
-    updated_at_ms: int
-
-
-@dataclass(frozen=True, slots=True)
 class Stage:
     stage_number: int
     name: str
-    created_at_ms: int
-    updated_at_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,14 +73,6 @@ class Task:
     stage_number: int
     task_number: int
     correct_answer_raw: str
-    correct_answer_normalized: str
-    created_at_ms: int
-    updated_at_ms: int
-
-
-@dataclass(frozen=True, slots=True)
-class TaskContent:
-    task: Task
     prompt_parts: tuple[ContentPart, ...]
 
 
@@ -118,41 +100,21 @@ class CaptainTransition:
 
 
 @dataclass(frozen=True, slots=True)
-class TaskAttempt:
-    attempt_id: int
-    user_id: int
-    stage_number: int
-    task_number: int
+class RecordedAttempt:
     attempt_number: int
-    raw_answer: str
-    normalized_answer: str
-    event_at_ms: int
-    recorded_at_ms: int
-    source_update_id: int
+    correct: bool
 
 
 @dataclass(frozen=True, slots=True)
 class TaskProgress:
-    task: Task
+    stage_number: int
+    task_number: int
     solved_attempt_number: int | None
     points: int
 
     @property
     def solved(self) -> bool:
         return self.solved_attempt_number is not None
-
-
-@dataclass(frozen=True, slots=True)
-class TransitionResult:
-    state: CaptainState
-    transition: CaptainTransition | None
-    applied: bool
-
-
-@dataclass(frozen=True, slots=True)
-class AttemptResult:
-    attempt: TaskAttempt
-    created: bool
 
 
 @dataclass(frozen=True, slots=True)

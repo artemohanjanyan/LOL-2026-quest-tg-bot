@@ -13,7 +13,6 @@ from quest_bot import messages
 from quest_bot.app import create_application
 from quest_bot.config import Settings
 from quest_bot.service import QuestService
-from quest_bot.storage.base import QuestStore
 from quest_bot.storage.sqlite import SQLiteQuestStore
 from tests.fakes import FakeTelegramRequest, TelegramUser
 from tests.quest_setup import (
@@ -41,7 +40,7 @@ class MutableClock:
 class BotHarness:
     application: TestApplication
     telegram: FakeTelegramRequest
-    store: QuestStore
+    store: SQLiteQuestStore
     clock: MutableClock
 
     def user(self, user_id: int, username: str) -> TelegramUser:
@@ -157,6 +156,11 @@ async def test_answers_and_live_configuration_recalculate_visible_score(
     assert "Завдання: 1 із 2 розв’язано" in sent[2]
     assert sent[3] == messages.TASK_ALREADY_SOLVED
 
+    await admin.send("/set_scores 1 2 0")
+    assert bot_harness.telegram.messages_to(ADMIN_ID)[-1] == messages.USAGE_SET_SCORES
+    await captain.send("/status")
+    assert "Бали: 8" in bot_harness.telegram.messages_to(CAPTAIN_ID)[-1]
+
     await admin.send("/set_scores 12 7 0")
     await captain.send("/status")
     assert "Бали: 7" in bot_harness.telegram.messages_to(CAPTAIN_ID)[-1]
@@ -194,6 +198,23 @@ async def test_duplicate_answer_update_does_not_create_another_attempt(
     progress = bot_harness.telegram.messages_to(ADMIN_ID)[-1]
     assert "Бали: 10" in progress
     assert "№1: 1 спроб" in progress
+
+
+@pytest.mark.asyncio
+async def test_zero_point_correct_answer_still_solves_task(bot_harness: BotHarness) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await admin.send("/set_scores 10 0")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/answer 1 81")
+    await captain.send("/answer 1 80")
+    await captain.send("/status")
+
+    sent = bot_harness.telegram.messages_to(CAPTAIN_ID)
+    assert sent[-2] == messages.answer_correct(points=0)
+    assert "Завдання: 1 із 2 розв’язано" in sent[-1]
+    assert "Бали: 0" in sent[-1]
 
 
 @pytest.mark.asyncio
@@ -261,6 +282,14 @@ async def test_admin_can_publish_multipart_intro_through_conversation(
     assert calls[0][1]["text"] == "A replacement introduction"
     assert calls[1][1]["document"] == "intro-pdf-id"
     assert calls[1][1]["caption"] == "Route papers"
+
+    bot_harness.telegram.clear()
+    await admin.send("/show_success_outro")
+    await admin.send("/show_timeout_outro")
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        "SUCCESS OUTRO: Reform Club reached",
+        "TIMEOUT OUTRO: The clock wins",
+    ]
 
 
 @pytest.mark.asyncio

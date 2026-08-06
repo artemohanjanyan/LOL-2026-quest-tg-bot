@@ -87,7 +87,6 @@ QUEST_NOT_READY = (
     "Експедиція ще не готова до відправлення: організатори мають "
     "опублікувати вступ, обидва фінали та хоча б один етап із завданнями."
 )
-QUEST_STARTED = "Відлік розпочато. Годинник уже рушив слідом за вами — час у дорогу!"
 QUEST_ALREADY_STARTED = "Ваша подорож уже триває; годинник не починається вдруге."
 INTRO_POSITION = "Ви на вступній зупинці. Коли будете готові, вирушайте далі командою /next_stage."
 NO_STAGES = "На мапі поки немає жодного етапу. Повідомте організаторів."
@@ -209,7 +208,6 @@ TASK_NOT_FOUND = "Такого завдання немає на поточном
 TASK_ALREADY_SOLVED = "Це завдання вже розв’язано — рухайтеся далі за маршрутом."
 ANSWER_NOT_AVAILABLE = "Відповідати можна лише на завдання поточного етапу."
 TERMINAL_PLAY_REJECTED = "Ця подорож уже завершена; нові відповіді та переходи закрито."
-NEXT_STAGE_UNAVAILABLE = "Наступного етапу зараз немає на мапі."
 
 
 def answer_correct(*, points: int) -> str:
@@ -249,10 +247,6 @@ DRAFT_PUBLISHED = "Чернетку опубліковано. Мапу експ�
 NO_ACTIVE_DRAFT = "Немає відкритої чернетки."
 CORRECT_ANSWER_SAVED = "Правильну відповідь додано до чернетки завдання."
 CONTENT_PART_ADDED = "Частину додано до чернетки."
-CONFIRM_DELETE = (
-    "Це назавжди прибере вміст із поточної мапи. Повторіть команду для підтвердження або /cancel."
-)
-DELETE_CANCELLED = "Видалення скасовано."
 CONTENT_DELETED = "Вміст видалено з поточної мапи."
 CAPTAIN_NOT_FOUND = "Капітана не знайдено. Перевірте username або Telegram ID."
 
@@ -269,10 +263,6 @@ def stage_saved(stage_number: int, stage_name: str) -> str:
     return f"Етап {stage_number} — {stage_name} збережено."
 
 
-def task_saved(stage_number: int, task_number: int) -> str:
-    return f"Завдання {task_number} етапу {stage_number} опубліковано."
-
-
 def scores_updated(points: Iterable[int]) -> str:
     rendered = ", ".join(str(point) for point in points)
     return f"Шкалу балів оновлено: {rendered}."
@@ -284,73 +274,3 @@ def time_limit_updated(minutes: int) -> str:
 
 def broadcast_complete(*, delivered: int, failed: int) -> str:
     return f"Оголошення завершено. Доставлено: {delivered}; помилок: {failed}."
-
-
-__all__ = [
-    "ADMIN_HELP",
-    "ANSWER_NOT_AVAILABLE",
-    "CAPTAIN_HELP",
-    "CAPTAIN_NOT_FOUND",
-    "CONFIRM_DELETE",
-    "CONTENT_DELETED",
-    "CONTENT_PART_ADDED",
-    "CORRECT_ANSWER_SAVED",
-    "DELETE_CANCELLED",
-    "DRAFT_CANCELLED",
-    "DRAFT_PUBLISHED",
-    "DRAFT_READY",
-    "INACTIVE_USER",
-    "INTRO_POSITION",
-    "NEXT_STAGE_UNAVAILABLE",
-    "NOTHING_TO_CANCEL",
-    "NO_ACTIVE_DRAFT",
-    "NO_CURRENT_STAGE",
-    "NO_SKIP_CONFIRMATION",
-    "NO_STAGES",
-    "PERMISSION_DENIED",
-    "QUEST_ALREADY_STARTED",
-    "QUEST_FINISHED",
-    "QUEST_NOT_READY",
-    "QUEST_STARTED",
-    "SKIP_CANCELLED",
-    "SKIP_CONFIRMED",
-    "TASK_ALREADY_SOLVED",
-    "TASK_NOT_FOUND",
-    "TECHNICAL_ERROR",
-    "TERMINAL_PLAY_REJECTED",
-    "UNKNOWN_COMMAND",
-    "UNKNOWN_USER",
-    "USAGE_ADD_CAPTAIN",
-    "USAGE_ANSWER",
-    "USAGE_CORRECT_ANSWER",
-    "USAGE_DELETE_STAGE",
-    "USAGE_DELETE_TASK",
-    "USAGE_PROGRESS",
-    "USAGE_REMOVE_CAPTAIN",
-    "USAGE_SET_SCORES",
-    "USAGE_SET_STAGE",
-    "USAGE_SET_TASK",
-    "USAGE_SET_TIME_LIMIT",
-    "USAGE_SHOW_STAGE",
-    "USAGE_SHOW_TASK",
-    "answer_correct",
-    "answer_incorrect",
-    "broadcast_complete",
-    "captain_added",
-    "captain_removed",
-    "format_duration",
-    "help_message",
-    "quest_started",
-    "scores_updated",
-    "skip_warning",
-    "stage_heading",
-    "stage_saved",
-    "status_finished",
-    "status_intro",
-    "status_not_started",
-    "status_stage",
-    "status_timed_out",
-    "task_heading",
-    "task_saved",
-    "time_limit_updated",
-]

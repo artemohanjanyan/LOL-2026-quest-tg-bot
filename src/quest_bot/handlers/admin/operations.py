@@ -13,7 +13,7 @@ from quest_bot.handlers.common import (
     Dependencies,
     HandlerType,
     actor_id,
-    command_args,
+    parse_integer_args,
     send_text,
 )
 
@@ -24,14 +24,13 @@ async def set_scores(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if not args:
+    points = parse_integer_args(context)
+    if not points:
         await send_text(update, deps, messages.USAGE_SET_SCORES)
         return
     try:
-        points = tuple(int(value) for value in args)
         saved = deps.service.set_scores(actor_id(update), points)
-    except (ValueError, ContentValidationError):
+    except ContentValidationError:
         await send_text(update, deps, messages.USAGE_SET_SCORES)
         return
     await send_text(update, deps, messages.scores_updated(saved))
@@ -43,14 +42,14 @@ async def set_time_limit(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if len(args) != 1:
+    numbers = parse_integer_args(context, count=1)
+    if numbers is None:
         await send_text(update, deps, messages.USAGE_SET_TIME_LIMIT)
         return
+    (minutes,) = numbers
     try:
-        minutes = int(args[0])
         saved = deps.service.set_time_limit(actor_id(update), minutes)
-    except (ValueError, ContentValidationError):
+    except ContentValidationError:
         await send_text(update, deps, messages.USAGE_SET_TIME_LIMIT)
         return
     await send_text(update, deps, messages.time_limit_updated(saved))
@@ -61,6 +60,3 @@ def build_handlers(deps: Dependencies) -> list[HandlerType]:
         CommandHandler("set_scores", partial(set_scores, deps=deps)),
         CommandHandler("set_time_limit", partial(set_time_limit, deps=deps)),
     ]
-
-
-__all__ = ["build_handlers"]

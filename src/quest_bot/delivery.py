@@ -56,13 +56,11 @@ class TelegramDelivery:
         self,
         chat_id: int,
         parts: Iterable[ContentPart],
-    ) -> tuple[Message, ...]:
+    ) -> None:
         """Send parts sequentially in iterable order."""
 
-        sent: list[Message] = []
         for part in parts:
-            sent.append(await self.send_part(chat_id, part))
-        return tuple(sent)
+            await self.send_part(chat_id, part)
 
     async def send_part(self, chat_id: int, part: ContentPart) -> Message:
         """Send one part using its matching Telegram Bot API method."""
@@ -221,11 +219,3 @@ class TelegramDelivery:
                 "remaining_parts_aborted": aborted,
             },
         )
-
-
-__all__ = [
-    "OUTRO_MAX_ATTEMPTS",
-    "PLAIN_PARSE_MODE",
-    "OutroDeliveryReport",
-    "TelegramDelivery",
-]

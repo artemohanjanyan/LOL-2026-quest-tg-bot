@@ -14,6 +14,7 @@ from quest_bot.handlers.common import (
     HandlerType,
     actor_id,
     command_args,
+    parse_integer_args,
     send_text,
 )
 
@@ -51,15 +52,11 @@ async def remove_captain(
     *,
     deps: Dependencies,
 ) -> None:
-    args = command_args(context)
-    if len(args) != 1:
+    numbers = parse_integer_args(context, count=1)
+    if numbers is None:
         await send_text(update, deps, messages.USAGE_REMOVE_CAPTAIN)
         return
-    try:
-        telegram_id = int(args[0])
-    except ValueError:
-        await send_text(update, deps, messages.USAGE_REMOVE_CAPTAIN)
-        return
+    (telegram_id,) = numbers
     deps.service.require_admin(actor_id(update))
     try:
         user = deps.service.resolve_user(str(telegram_id))
@@ -82,7 +79,6 @@ async def list_users(
     *,
     deps: Dependencies,
 ) -> None:
-    del context
     users = deps.service.list_users(actor_id(update))
     if not users:
         await send_text(update, deps, "Список мандрівників порожній.")
@@ -102,6 +98,3 @@ def build_handlers(deps: Dependencies) -> list[HandlerType]:
         CommandHandler("remove_captain", partial(remove_captain, deps=deps)),
         CommandHandler("list_users", partial(list_users, deps=deps)),
     ]
-
-
-__all__ = ["build_handlers"]

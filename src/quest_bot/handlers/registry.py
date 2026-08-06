@@ -29,7 +29,6 @@ COMMANDS: tuple[BotCommand, ...] = (
 
 
 async def unknown_command(update: Update, context: object, *, deps: Dependencies) -> None:
-    del context
     await send_text(update, deps, messages.UNKNOWN_COMMAND)
 
 
@@ -46,6 +45,3 @@ def register_handlers(
             application.add_handler(handler)
     application.add_handler(MessageHandler(filters.COMMAND, partial(unknown_command, deps=deps)))
     register_error_handler(application, deps)
-
-
-__all__ = ["COMMANDS", "register_handlers"]

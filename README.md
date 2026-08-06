@@ -84,8 +84,8 @@ The bot stores times and reports durations in UTC. Quest conversations may run i
 where Telegram delivers them; configure group availability through BotFather for the intended
 deployment.
 
-SQLite is the durable source of truth. The process enables foreign keys, WAL,
-and a bounded busy timeout, runs packaged versioned migrations at startup, and
-holds an adjacent `.lock` file so two bot processes cannot use the same quest
-database. Back up the database (including WAL state, or use SQLite's backup
-facility) and rehearse backup and restart procedures before the event.
+SQLite 3.35 or newer is the durable source of truth. The process enables foreign
+keys, WAL, and a bounded busy timeout, runs packaged versioned migrations at
+startup, and holds an adjacent `.lock` file so two bot processes cannot use the
+same quest database. Back up the database (including WAL state, or use SQLite's
+backup facility) and rehearse backup and restart procedures before the event.

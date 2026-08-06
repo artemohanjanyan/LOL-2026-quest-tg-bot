@@ -15,27 +15,24 @@ from quest_bot.errors import (
     UnknownUser,
 )
 from quest_bot.models import (
-    AttemptResult,
     CaptainPosition,
     CaptainState,
     CaptainSummary,
     ContentPart,
     OutroKind,
     Stage,
-    TaskAttempt,
-    TaskContent,
+    Task,
     User,
     UserRole,
     utc_now_ms,
 )
 from quest_bot.storage.base import (
-    QuestStore,
     RecordNotFoundError,
     StateConflictError,
     TaskAlreadySolvedError,
+    TaskLimitExceededError,
 )
-
-MAX_TASKS_PER_STAGE = 9
+from quest_bot.storage.sqlite import SQLiteQuestStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +45,7 @@ class StartResult:
 @dataclass(frozen=True, slots=True)
 class StagePresentation:
     stage: Stage
-    tasks: tuple[TaskContent, ...]
+    tasks: tuple[Task, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +54,6 @@ class AdvanceResult:
     presentation: StagePresentation | None
     unsolved_task_numbers: tuple[int, ...]
     finished: bool
-    applied: bool
     outro_parts: tuple[ContentPart, ...] = ()
 
     @property
@@ -67,10 +63,9 @@ class AdvanceResult:
 
 @dataclass(frozen=True, slots=True)
 class AnswerResult:
-    attempt: TaskAttempt
+    attempt_number: int
     correct: bool
     points: int
-    created: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +91,7 @@ class QuestService:
 
     def __init__(
         self,
-        store: QuestStore,
+        store: SQLiteQuestStore,
         *,
         clock: Callable[[], int] = utc_now_ms,
     ) -> None:
@@ -129,17 +124,26 @@ class QuestService:
         source_update_id: int,
     ) -> StartResult:
         self.require_user(actor_id)
-        existing = self.store.ensure_captain_state(actor_id)
+        existing = self.store.get_captain_state(actor_id)
         if existing.position is not CaptainPosition.NOT_STARTED:
             return StartResult(existing, self.store.get_intro_parts(), False)
         self._assert_quest_ready()
-        transition = self.store.start_captain(
-            actor_id,
-            event_at_ms=event_at_ms,
-            recorded_at_ms=self._clock(),
-            source_update_id=source_update_id,
-        )
-        return StartResult(transition.state, self.store.get_intro_parts(), transition.applied)
+        try:
+            state = self.store.transition_captain(
+                actor_id,
+                expected_position=CaptainPosition.NOT_STARTED,
+                expected_stage_number=None,
+                target_position=CaptainPosition.INTRO,
+                target_stage_number=None,
+                event_at_ms=event_at_ms,
+                recorded_at_ms=self._clock(),
+                source_update_id=source_update_id,
+            )
+        except StateConflictError:
+            return StartResult(
+                self.store.get_captain_state(actor_id), self.store.get_intro_parts(), False
+            )
+        return StartResult(state, self.store.get_intro_parts(), True)
 
     def advance(
         self,
@@ -150,7 +154,7 @@ class QuestService:
         confirm_skip: bool = False,
     ) -> AdvanceResult:
         self.require_user(actor_id)
-        state = self.store.ensure_captain_state(actor_id)
+        state = self.store.get_captain_state(actor_id)
         if state.position.is_terminal:
             raise InvalidQuestState("terminal")
         if state.position is CaptainPosition.NOT_STARTED:
@@ -167,10 +171,14 @@ class QuestService:
             next_stage = stages[0]
         else:
             assert state.current_stage_number is not None
-            progress = self.store.get_stage_progress(actor_id, state.current_stage_number)
-            unsolved = tuple(item.task.task_number for item in progress if not item.solved)
+            progress = self.store.list_task_progress(actor_id)
+            unsolved = tuple(
+                item.task_number
+                for item in progress
+                if item.stage_number == state.current_stage_number and not item.solved
+            )
             if unsolved and not confirm_skip:
-                return AdvanceResult(state, None, unsolved, False, False)
+                return AdvanceResult(state, None, unsolved, False)
             skipped = bool(unsolved)
             next_stage = next(
                 (stage for stage in stages if stage.stage_number > state.current_stage_number),
@@ -185,7 +193,7 @@ class QuestService:
             target_stage_number = next_stage.stage_number
 
         try:
-            transition = self.store.transition_captain(
+            actual_state = self.store.transition_captain(
                 actor_id,
                 expected_position=state.position,
                 expected_stage_number=state.current_stage_number,
@@ -199,41 +207,20 @@ class QuestService:
         except StateConflictError as error:
             raise InvalidQuestState("position changed") from error
 
-        if not transition.applied:
-            if transition.transition is None:
-                raise InvalidQuestState("position changed")
-            actual_state = transition.state
-            actual_presentation = (
-                self._presentation(actual_state.current_stage_number)
-                if actual_state.position is CaptainPosition.STAGE
-                and actual_state.current_stage_number is not None
-                else None
-            )
-            return AdvanceResult(
-                actual_state,
-                actual_presentation,
-                (),
-                actual_state.position is CaptainPosition.FINISHED,
-                False,
-                (
-                    self.store.get_outro_parts(OutroKind.SUCCESS)
-                    if actual_state.position is CaptainPosition.FINISHED
-                    else ()
-                ),
-            )
-
         presentation = (
-            self._presentation(target_stage_number) if target_stage_number is not None else None
+            self._presentation(actual_state.current_stage_number)
+            if actual_state.position is CaptainPosition.STAGE
+            and actual_state.current_stage_number is not None
+            else None
         )
         return AdvanceResult(
-            transition.state,
+            actual_state,
             presentation,
             (),
-            target_position is CaptainPosition.FINISHED,
-            transition.applied,
+            actual_state.position is CaptainPosition.FINISHED,
             (
                 self.store.get_outro_parts(OutroKind.SUCCESS)
-                if target_position is CaptainPosition.FINISHED
+                if actual_state.position is CaptainPosition.FINISHED
                 else ()
             ),
         )
@@ -250,16 +237,13 @@ class QuestService:
         self.require_user(actor_id)
         if task_number <= 0 or not raw_answer.strip():
             raise ContentValidationError("invalid answer")
-        state = self.store.ensure_captain_state(actor_id)
+        state = self.store.get_captain_state(actor_id)
         if state.position.is_terminal:
             raise InvalidQuestState("terminal")
         if state.position is not CaptainPosition.STAGE or state.current_stage_number is None:
             raise InvalidQuestState("answers require a stage")
-        task = self.store.get_task(state.current_stage_number, task_number)
-        if task is None:
-            raise NotFound("task")
         try:
-            stored: AttemptResult = self.store.record_attempt(
+            stored = self.store.record_attempt(
                 actor_id,
                 state.current_stage_number,
                 task_number,
@@ -270,25 +254,26 @@ class QuestService:
             )
         except TaskAlreadySolvedError as error:
             raise InvalidQuestState("task already solved") from error
-        except (RecordNotFoundError, StateConflictError) as error:
+        except RecordNotFoundError as error:
+            raise NotFound("task") from error
+        except StateConflictError as error:
             raise InvalidQuestState("position changed") from error
 
-        correct = stored.attempt.normalized_answer == task.task.correct_answer_normalized
         score_steps = self.store.get_score_steps()
-        index = stored.attempt.attempt_number - 1
-        points = score_steps[index] if correct and index < len(score_steps) else 0
-        return AnswerResult(stored.attempt, correct, points, stored.created)
+        index = stored.attempt_number - 1
+        points = score_steps[index] if stored.correct and index < len(score_steps) else 0
+        return AnswerResult(stored.attempt_number, stored.correct, points)
 
     def get_stage(self, actor_id: int) -> StagePresentation:
         self.require_user(actor_id)
-        state = self.store.ensure_captain_state(actor_id)
+        state = self.store.get_captain_state(actor_id)
         if state.position is not CaptainPosition.STAGE or state.current_stage_number is None:
             raise InvalidQuestState("no current stage")
         return self._presentation(state.current_stage_number)
 
     def get_intro(self, actor_id: int) -> tuple[ContentPart, ...]:
         self.require_user(actor_id)
-        state = self.store.ensure_captain_state(actor_id)
+        state = self.store.get_captain_state(actor_id)
         if state.position is not CaptainPosition.INTRO:
             raise InvalidQuestState("not at intro")
         return self.store.get_intro_parts()
@@ -299,8 +284,8 @@ class QuestService:
 
     def _status_snapshot(self, user: User, *, now_ms: int | None = None) -> StatusSnapshot:
         now = self._clock() if now_ms is None else now_ms
-        state = self.store.ensure_captain_state(user.user_id)
-        settings = self.store.get_settings()
+        state = self.store.get_captain_state(user.user_id)
+        progress = self.store.list_task_progress(user.user_id)
         elapsed = 0
         if state.position.is_active and state.started_at_ms is not None:
             elapsed = max(0, (now - state.started_at_ms) // 1_000)
@@ -309,15 +294,17 @@ class QuestService:
         total = 0
         if state.position is CaptainPosition.STAGE and state.current_stage_number is not None:
             stage = self.store.get_stage(state.current_stage_number)
-            progress = self.store.get_stage_progress(user.user_id, state.current_stage_number)
-            solved = sum(item.solved for item in progress)
-            total = len(progress)
+            stage_progress = tuple(
+                item for item in progress if item.stage_number == state.current_stage_number
+            )
+            solved = sum(item.solved for item in stage_progress)
+            total = len(stage_progress)
         return StatusSnapshot(
             user=user,
             state=state,
             elapsed_seconds=elapsed,
-            limit_minutes=settings.time_limit_minutes,
-            total_score=self.store.get_total_score(user.user_id),
+            limit_minutes=self.store.get_time_limit(),
+            total_score=sum(item.points for item in progress),
             stage=stage,
             solved_tasks=solved,
             total_tasks=total,
@@ -325,21 +312,17 @@ class QuestService:
 
     # Administration --------------------------------------------------------
 
-    def add_captain(
-        self, actor_id: int, user_id: int, username: str, *, now_ms: int | None = None
-    ) -> User:
+    def add_captain(self, actor_id: int, user_id: int, username: str) -> User:
         self.require_admin(actor_id)
         self._validate_identity(user_id, username)
-        now = self._clock() if now_ms is None else now_ms
-        return self.store.add_captain(user_id, username.lstrip("@"), now)
+        return self.store.add_captain(user_id, username.lstrip("@"), self._clock())
 
-    def remove_captain(self, actor_id: int, user_id: int, *, now_ms: int | None = None) -> bool:
+    def remove_captain(self, actor_id: int, user_id: int) -> bool:
         self.require_admin(actor_id)
         target = self.store.get_user(user_id)
         if target is None or target.role is not UserRole.CAPTAIN:
             return False
-        now = self._clock() if now_ms is None else now_ms
-        return self.store.deactivate_captain(user_id, now)
+        return self.store.deactivate_captain(user_id, self._clock())
 
     def list_users(self, actor_id: int) -> tuple[User, ...]:
         self.require_admin(actor_id)
@@ -360,14 +343,11 @@ class QuestService:
         actor_id: int,
         stage_number: int,
         name: str,
-        *,
-        now_ms: int | None = None,
     ) -> Stage:
         self.require_admin(actor_id)
         if stage_number <= 0 or not name.strip():
             raise ContentValidationError("invalid stage")
-        now = self._clock() if now_ms is None else now_ms
-        return self.store.set_stage(stage_number, name.strip(), now)
+        return self.store.set_stage(stage_number, name.strip())
 
     def set_task(
         self,
@@ -376,29 +356,22 @@ class QuestService:
         task_number: int,
         correct_answer: str,
         prompt_parts: Sequence[ContentPart],
-        *,
-        now_ms: int | None = None,
-    ) -> TaskContent:
+    ) -> Task:
         self.require_admin(actor_id)
         if stage_number <= 0 or task_number <= 0 or not correct_answer.strip():
             raise ContentValidationError("invalid task")
         self._validate_parts(prompt_parts)
-        if self.store.get_stage(stage_number) is None:
-            raise NotFound("stage")
-        existing = self.store.get_task(stage_number, task_number)
-        if (
-            existing is None
-            and len(self.store.list_stage_tasks(stage_number)) >= MAX_TASKS_PER_STAGE
-        ):
-            raise ContentValidationError("too many tasks")
-        now = self._clock() if now_ms is None else now_ms
-        return self.store.set_task(
-            stage_number,
-            task_number,
-            correct_answer,
-            prompt_parts,
-            now,
-        )
+        try:
+            return self.store.set_task(
+                stage_number,
+                task_number,
+                correct_answer,
+                prompt_parts,
+            )
+        except RecordNotFoundError as error:
+            raise NotFound("stage") from error
+        except TaskLimitExceededError as error:
+            raise ContentValidationError("too many tasks") from error
 
     def delete_stage(self, actor_id: int, stage_number: int) -> bool:
         self.require_admin(actor_id)
@@ -416,7 +389,7 @@ class QuestService:
         self.require_admin(actor_id)
         return self._presentation(stage_number)
 
-    def show_task(self, actor_id: int, stage_number: int, task_number: int) -> TaskContent:
+    def show_task(self, actor_id: int, stage_number: int, task_number: int) -> Task:
         self.require_admin(actor_id)
         task = self.store.get_task(stage_number, task_number)
         if task is None:
@@ -433,15 +406,21 @@ class QuestService:
 
     def set_scores(self, actor_id: int, points: Sequence[int]) -> tuple[int, ...]:
         self.require_admin(actor_id)
-        if not points or any(point < 0 for point in points):
+        schedule = tuple(points)
+        if (
+            not schedule
+            or any(point < 0 for point in schedule)
+            or any(left < right for left, right in zip(schedule[:-1], schedule[1:], strict=True))
+            or schedule[-1] != 0
+        ):
             raise ContentValidationError("invalid scores")
-        return self.store.set_score_steps(points)
+        return self.store.set_score_steps(schedule)
 
     def set_time_limit(self, actor_id: int, minutes: int) -> int:
         self.require_admin(actor_id)
         if minutes <= 0:
             raise ContentValidationError("invalid time limit")
-        return self.store.set_time_limit(minutes, self._clock()).time_limit_minutes
+        return self.store.set_time_limit(minutes)
 
     def leaderboard(self, actor_id: int) -> tuple[CaptainSummary, ...]:
         self.require_admin(actor_id)
@@ -461,16 +440,16 @@ class QuestService:
         target = self.resolve_user(reference)
         return self._status_snapshot(target)
 
-    def captain_attempts(
+    def captain_attempt_counts(
         self,
         actor_id: int,
         reference: str,
         *,
-        stage_number: int | None = None,
-    ) -> tuple[TaskAttempt, ...]:
+        stage_number: int,
+    ) -> tuple[tuple[int, int], ...]:
         self.require_admin(actor_id)
         target = self.resolve_user(reference)
-        return self.store.list_attempts(target.user_id, stage_number=stage_number)
+        return self.store.get_attempt_counts(target.user_id, stage_number)
 
     def resolve_user(self, reference: str) -> User:
         cleaned = reference.strip().lstrip("@")
@@ -496,7 +475,7 @@ class QuestService:
         if not expired:
             return TimeoutSweepResult((), ())
         return TimeoutSweepResult(
-            tuple(result.state.user_id for result in expired),
+            tuple(state.user_id for state in expired),
             self.store.get_outro_parts(OutroKind.TIMEOUT),
         )
 
@@ -529,15 +508,3 @@ class QuestService:
     def _validate_identity(user_id: int, username: str) -> None:
         if user_id <= 0 or not username.strip().lstrip("@"):
             raise ContentValidationError("invalid captain")
-
-
-__all__ = [
-    "AdvanceResult",
-    "AnswerResult",
-    "MAX_TASKS_PER_STAGE",
-    "QuestService",
-    "StagePresentation",
-    "StartResult",
-    "StatusSnapshot",
-    "TimeoutSweepResult",
-]

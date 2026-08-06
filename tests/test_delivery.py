@@ -35,9 +35,8 @@ async def test_ordered_delivery_supports_all_quest_content_types(
     )
 
     async with bot:
-        delivered = await TelegramDelivery(bot).send_parts(202, parts)
+        await TelegramDelivery(bot).send_parts(202, parts)
 
-    assert len(delivered) == len(parts)
     calls = telegram_request.calls_to(202)
     assert [method for method, _ in calls] == [
         "sendMessage",

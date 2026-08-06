@@ -99,6 +99,3 @@ def create_application(
     application.bot_data[SWEEP_INTERVAL_KEY] = settings.sweep_interval_seconds
     register_handlers(application, deps)
     return application
-
-
-__all__ = ["create_application"]

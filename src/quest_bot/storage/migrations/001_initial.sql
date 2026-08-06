@@ -3,8 +3,7 @@ CREATE TABLE users (
     username TEXT NOT NULL CHECK (length(trim(username)) > 0),
     role TEXT NOT NULL CHECK (role IN ('admin', 'captain')),
     active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-    created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
-    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms)
+    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0)
 ) STRICT;
 
 CREATE INDEX users_username_nocase_idx
@@ -13,12 +12,11 @@ CREATE INDEX users_username_nocase_idx
 CREATE TABLE quest_settings (
     singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
     time_limit_minutes INTEGER NOT NULL DEFAULT 80
-        CHECK (time_limit_minutes > 0),
-    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0)
+        CHECK (time_limit_minutes > 0)
 ) STRICT;
 
-INSERT INTO quest_settings (singleton_id, time_limit_minutes, updated_at_ms)
-VALUES (1, 80, 0);
+INSERT INTO quest_settings (singleton_id, time_limit_minutes)
+VALUES (1, 80);
 
 CREATE TABLE score_steps (
     attempt_number INTEGER PRIMARY KEY CHECK (attempt_number > 0),
@@ -28,44 +26,24 @@ CREATE TABLE score_steps (
 INSERT INTO score_steps (attempt_number, points)
 VALUES (1, 10), (2, 8), (3, 5), (4, 0);
 
-CREATE TABLE quest_intro_parts (
-    part_number INTEGER PRIMARY KEY CHECK (part_number > 0),
+CREATE TABLE global_content_parts (
+    content_kind TEXT NOT NULL CHECK (
+        content_kind IN ('intro', 'success', 'timeout')
+    ),
+    part_number INTEGER NOT NULL CHECK (part_number > 0),
     content_type TEXT NOT NULL CHECK (
         content_type IN (
             'text', 'photo', 'sticker', 'voice', 'document', 'video', 'video_note'
         )
     ),
     data TEXT NOT NULL CHECK (length(data) > 0),
-    caption TEXT
-) STRICT;
-
-CREATE TABLE success_outro_parts (
-    part_number INTEGER PRIMARY KEY CHECK (part_number > 0),
-    content_type TEXT NOT NULL CHECK (
-        content_type IN (
-            'text', 'photo', 'sticker', 'voice', 'document', 'video', 'video_note'
-        )
-    ),
-    data TEXT NOT NULL CHECK (length(data) > 0),
-    caption TEXT
-) STRICT;
-
-CREATE TABLE timeout_outro_parts (
-    part_number INTEGER PRIMARY KEY CHECK (part_number > 0),
-    content_type TEXT NOT NULL CHECK (
-        content_type IN (
-            'text', 'photo', 'sticker', 'voice', 'document', 'video', 'video_note'
-        )
-    ),
-    data TEXT NOT NULL CHECK (length(data) > 0),
-    caption TEXT
-) STRICT;
+    caption TEXT,
+    PRIMARY KEY (content_kind, part_number)
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE stages (
     stage_number INTEGER PRIMARY KEY CHECK (stage_number > 0),
-    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
-    created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
-    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms)
+    name TEXT NOT NULL CHECK (length(trim(name)) > 0)
 ) STRICT;
 
 CREATE TABLE tasks (
@@ -74,8 +52,6 @@ CREATE TABLE tasks (
     correct_answer_raw TEXT NOT NULL CHECK (length(trim(correct_answer_raw)) > 0),
     correct_answer_normalized TEXT NOT NULL
         CHECK (length(correct_answer_normalized) > 0),
-    created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
-    updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
     PRIMARY KEY (stage_number, task_number),
     FOREIGN KEY (stage_number) REFERENCES stages(stage_number) ON DELETE CASCADE
 ) STRICT, WITHOUT ROWID;
@@ -189,3 +165,17 @@ CREATE INDEX task_attempts_task_idx
 
 CREATE INDEX task_attempts_answer_idx
     ON task_attempts(user_id, stage_number, task_number, normalized_answer);
+
+CREATE VIEW task_progress AS
+SELECT users.user_id,
+       tasks.stage_number,
+       tasks.task_number,
+       min(task_attempts.attempt_number) AS attempt_number
+FROM users
+CROSS JOIN tasks
+LEFT JOIN task_attempts
+  ON task_attempts.user_id = users.user_id
+ AND task_attempts.stage_number = tasks.stage_number
+ AND task_attempts.task_number = tasks.task_number
+ AND task_attempts.normalized_answer = tasks.correct_answer_normalized
+GROUP BY users.user_id, tasks.stage_number, tasks.task_number;
