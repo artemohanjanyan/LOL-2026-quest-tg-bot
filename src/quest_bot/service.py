@@ -1,7 +1,5 @@
 """Quest rules and orchestration independent of Telegram update objects."""
 
-from __future__ import annotations
-
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 

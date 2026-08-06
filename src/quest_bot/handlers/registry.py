@@ -1,7 +1,5 @@
 """Explicit handler ordering and Telegram command metadata."""
 
-from __future__ import annotations
-
 from functools import partial
 
 from telegram import BotCommand, Update

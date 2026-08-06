@@ -1,7 +1,5 @@
 """Production composition root."""
 
-from __future__ import annotations
-
 import logging
 
 from telegram import Update

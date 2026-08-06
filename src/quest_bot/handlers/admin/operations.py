@@ -1,7 +1,5 @@
 """Administrator live settings and delivery operations."""
 
-from __future__ import annotations
-
 from functools import partial
 
 from telegram import Update

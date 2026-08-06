@@ -1,7 +1,5 @@
 """Administrator quest-content drafts and inspection commands."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial

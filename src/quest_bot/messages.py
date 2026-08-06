@@ -5,8 +5,6 @@ stored and delivered verbatim.  These helpers do not emit Telegram markup, so
 captain and stage names can be interpolated without HTML/Markdown escaping.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterable
 
 # Access and common validation -------------------------------------------------

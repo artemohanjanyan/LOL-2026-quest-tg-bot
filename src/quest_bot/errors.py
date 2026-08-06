@@ -1,7 +1,5 @@
 """Intentional errors raised by the quest application layer."""
 
-from __future__ import annotations
-
 
 class QuestError(Exception):
     """Base class for expected, user-facing quest failures."""

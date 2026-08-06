@@ -1,7 +1,5 @@
 """Administrator enrollment and role commands."""
 
-from __future__ import annotations
-
 from functools import partial
 
 from telegram import Update

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from quest_bot.models import ContentPart, ContentType, OutroKind
 from quest_bot.storage.sqlite import SQLiteQuestStore
 

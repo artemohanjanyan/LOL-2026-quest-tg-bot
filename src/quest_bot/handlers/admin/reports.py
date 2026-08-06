@@ -1,7 +1,5 @@
 """Administrator progress and leaderboard reports."""
 
-from __future__ import annotations
-
 from functools import partial
 
 from telegram import Update

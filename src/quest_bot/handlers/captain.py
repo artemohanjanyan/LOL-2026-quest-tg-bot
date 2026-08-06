@@ -1,7 +1,5 @@
 """Captain-facing Telegram command handlers."""
 
-from __future__ import annotations
-
 from functools import partial
 
 from telegram import Update

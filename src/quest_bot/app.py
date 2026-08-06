@@ -1,7 +1,5 @@
 """python-telegram-bot application factory and periodic job wiring."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 
