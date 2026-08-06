@@ -216,6 +216,11 @@ def test_timeout_is_claimed_by_sweep(store: QuestStore) -> None:
 
     assert len(claimed) == 1
     assert claimed[0].state.position is CaptainPosition.TIMED_OUT
+    terminal_transition = store.list_captain_transitions(CAPTAIN_ID)[-1]
+    assert terminal_transition.from_position is CaptainPosition.STAGE
+    assert terminal_transition.to_position is CaptainPosition.TIMED_OUT
+    assert terminal_transition.event_at_ms == BASE_TIME_MS + 61_003
+    assert terminal_transition.recorded_at_ms == BASE_TIME_MS + 61_003
 
 
 def test_finishing_during_sweep_grace_reaches_terminal_state(store: QuestStore) -> None:
@@ -239,3 +244,8 @@ def test_finishing_during_sweep_grace_reaches_terminal_state(store: QuestStore) 
     )
 
     assert finished.state.position is CaptainPosition.FINISHED
+    terminal_transition = store.list_captain_transitions(OTHER_CAPTAIN_ID)[-1]
+    assert terminal_transition.from_position is CaptainPosition.STAGE
+    assert terminal_transition.to_position is CaptainPosition.FINISHED
+    assert terminal_transition.event_at_ms == BASE_TIME_MS + 61_500
+    assert terminal_transition.recorded_at_ms == BASE_TIME_MS + 61_501

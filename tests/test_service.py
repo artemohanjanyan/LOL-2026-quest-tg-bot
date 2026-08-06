@@ -15,6 +15,7 @@ from tests.quest_setup import (
     ADMIN_ID,
     BASE_TIME_MS,
     CAPTAIN_ID,
+    OTHER_CAPTAIN_ID,
     seed_ready_quest,
     seed_second_stage,
     seed_users,
@@ -249,3 +250,30 @@ def test_admin_content_changes_require_admin_role(
 
     stage = service.set_stage(ADMIN_ID, 2, "Бомбей")
     assert stage.name == "Бомбей"
+
+
+def test_leaderboard_orders_by_score_then_username(
+    service_and_store: tuple[QuestService, QuestStore, MutableClock],
+) -> None:
+    service, _, clock = service_and_store
+    service.add_captain(ADMIN_ID, OTHER_CAPTAIN_ID, "aardvark")
+
+    tied = service.leaderboard(ADMIN_ID)
+    assert [summary.user.username for summary in tied] == ["aardvark", "passepartout"]
+
+    service.start(CAPTAIN_ID, event_at_ms=clock.now_ms, source_update_id=60)
+    service.advance(
+        CAPTAIN_ID,
+        event_at_ms=clock.now_ms + 1_000,
+        source_update_id=61,
+    )
+    service.answer(
+        CAPTAIN_ID,
+        1,
+        "80",
+        event_at_ms=clock.now_ms + 2_000,
+        source_update_id=62,
+    )
+
+    scored = service.leaderboard(ADMIN_ID)
+    assert [summary.user.username for summary in scored] == ["passepartout", "aardvark"]

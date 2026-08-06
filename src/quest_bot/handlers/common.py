@@ -132,13 +132,8 @@ def render_status(snapshot: StatusSnapshot) -> str:
             total_tasks=snapshot.total_tasks,
         )
     if state.position is CaptainPosition.FINISHED:
-        return messages.status_finished(
-            elapsed_seconds=snapshot.elapsed_seconds,
-            score=snapshot.total_score,
-        )
+        return messages.status_finished(score=snapshot.total_score)
     return messages.status_timed_out(
-        elapsed_seconds=snapshot.elapsed_seconds,
-        limit_minutes=snapshot.limit_minutes,
         score=snapshot.total_score,
     )
 

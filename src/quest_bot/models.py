@@ -99,11 +99,7 @@ class CaptainState:
     user_id: int
     position: CaptainPosition
     started_at_ms: int | None
-    position_changed_at_ms: int
     current_stage_number: int | None
-    terminal_at_ms: int | None
-    timeout_deadline_at_ms: int | None
-    timeout_limit_minutes: int | None
 
 
 @dataclass(frozen=True, slots=True)

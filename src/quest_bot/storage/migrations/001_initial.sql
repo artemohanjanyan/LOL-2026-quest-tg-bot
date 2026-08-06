@@ -102,16 +102,8 @@ CREATE TABLE captain_state (
         position IN ('not_started', 'intro', 'stage', 'finished', 'timed_out')
     ),
     started_at_ms INTEGER CHECK (started_at_ms IS NULL OR started_at_ms >= 0),
-    position_changed_at_ms INTEGER NOT NULL CHECK (position_changed_at_ms >= 0),
     current_stage_number INTEGER CHECK (
         current_stage_number IS NULL OR current_stage_number > 0
-    ),
-    terminal_at_ms INTEGER CHECK (terminal_at_ms IS NULL OR terminal_at_ms >= 0),
-    timeout_deadline_at_ms INTEGER CHECK (
-        timeout_deadline_at_ms IS NULL OR timeout_deadline_at_ms >= 0
-    ),
-    timeout_limit_minutes INTEGER CHECK (
-        timeout_limit_minutes IS NULL OR timeout_limit_minutes > 0
     ),
     FOREIGN KEY (user_id) REFERENCES users(user_id),
     CHECK (
@@ -119,41 +111,21 @@ CREATE TABLE captain_state (
             position = 'not_started'
             AND started_at_ms IS NULL
             AND current_stage_number IS NULL
-            AND terminal_at_ms IS NULL
-            AND timeout_deadline_at_ms IS NULL
-            AND timeout_limit_minutes IS NULL
         )
         OR (
             position = 'intro'
             AND started_at_ms IS NOT NULL
             AND current_stage_number IS NULL
-            AND terminal_at_ms IS NULL
-            AND timeout_deadline_at_ms IS NULL
-            AND timeout_limit_minutes IS NULL
         )
         OR (
             position = 'stage'
             AND started_at_ms IS NOT NULL
             AND current_stage_number IS NOT NULL
-            AND terminal_at_ms IS NULL
-            AND timeout_deadline_at_ms IS NULL
-            AND timeout_limit_minutes IS NULL
         )
         OR (
-            position = 'finished'
+            position IN ('finished', 'timed_out')
             AND started_at_ms IS NOT NULL
             AND current_stage_number IS NULL
-            AND terminal_at_ms IS NOT NULL
-            AND timeout_deadline_at_ms IS NULL
-            AND timeout_limit_minutes IS NULL
-        )
-        OR (
-            position = 'timed_out'
-            AND started_at_ms IS NOT NULL
-            AND current_stage_number IS NULL
-            AND terminal_at_ms IS NOT NULL
-            AND timeout_deadline_at_ms IS NOT NULL
-            AND timeout_limit_minutes IS NOT NULL
         )
     )
 ) STRICT;

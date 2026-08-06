@@ -105,7 +105,7 @@ class QuestStore(Protocol):
 
     def get_captain_state(self, user_id: int) -> CaptainState | None: ...
 
-    def ensure_captain_state(self, user_id: int, now_ms: int) -> CaptainState: ...
+    def ensure_captain_state(self, user_id: int) -> CaptainState: ...
 
     def start_captain(
         self,
@@ -128,8 +128,6 @@ class QuestStore(Protocol):
         recorded_at_ms: int,
         source_update_id: int | None,
         skipped_unsolved_tasks: bool = False,
-        timeout_deadline_at_ms: int | None = None,
-        timeout_limit_minutes: int | None = None,
     ) -> TransitionResult: ...
 
     def claim_overdue_captains(self, now_ms: int) -> tuple[TransitionResult, ...]: ...

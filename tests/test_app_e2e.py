@@ -246,6 +246,10 @@ async def test_finishing_quest_sends_current_success_outro(
     assert state is not None
     assert state.position is CaptainPosition.FINISHED
 
+    bot_harness.telegram.clear()
+    await captain.send("/status")
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.status_finished(score=0)]
+
 
 @pytest.mark.asyncio
 async def test_startup_timeout_sweep_sends_current_timeout_outro(
@@ -266,3 +270,7 @@ async def test_startup_timeout_sweep_sends_current_timeout_outro(
     state = bot_harness.store.get_captain_state(CAPTAIN_ID)
     assert state is not None
     assert state.position is CaptainPosition.TIMED_OUT
+
+    bot_harness.telegram.clear()
+    await captain.send("/status")
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.status_timed_out(score=0)]

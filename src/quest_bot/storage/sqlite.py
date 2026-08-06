@@ -273,7 +273,7 @@ class SQLiteQuestStore:
                 """,
                 (user_id, username, now_ms, now_ms),
             )
-            self._ensure_captain_state_in_transaction(connection, user_id, now_ms)
+            self._ensure_captain_state_in_transaction(connection, user_id)
             row = self._require_row(
                 connection.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone(),
                 "user",
@@ -297,7 +297,7 @@ class SQLiteQuestStore:
                 """,
                 (user_id, username, role.value, now_ms, now_ms),
             )
-            self._ensure_captain_state_in_transaction(connection, user_id, now_ms)
+            self._ensure_captain_state_in_transaction(connection, user_id)
             row = self._require_row(
                 connection.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone(),
                 "user",
@@ -629,9 +629,9 @@ class SQLiteQuestStore:
         )
         return None if row is None else self._captain_state_from_row(row)
 
-    def ensure_captain_state(self, user_id: int, now_ms: int) -> CaptainState:
+    def ensure_captain_state(self, user_id: int) -> CaptainState:
         with self._transaction() as connection:
-            self._ensure_captain_state_in_transaction(connection, user_id, now_ms)
+            self._ensure_captain_state_in_transaction(connection, user_id)
             row = self._require_row(
                 connection.execute(
                     "SELECT * FROM captain_state WHERE user_id = ?", (user_id,)
@@ -641,17 +641,14 @@ class SQLiteQuestStore:
         return self._captain_state_from_row(row)
 
     @staticmethod
-    def _ensure_captain_state_in_transaction(
-        connection: sqlite3.Connection, user_id: int, now_ms: int
-    ) -> None:
+    def _ensure_captain_state_in_transaction(connection: sqlite3.Connection, user_id: int) -> None:
         connection.execute(
             """
-            INSERT INTO captain_state (
-                user_id, position, position_changed_at_ms
-            ) VALUES (?, 'not_started', ?)
+            INSERT INTO captain_state (user_id, position)
+            VALUES (?, 'not_started')
             ON CONFLICT(user_id) DO NOTHING
             """,
-            (user_id, now_ms),
+            (user_id,),
         )
 
     def start_captain(
@@ -683,8 +680,6 @@ class SQLiteQuestStore:
                 recorded_at_ms=recorded_at_ms,
                 source_update_id=source_update_id,
                 skipped_unsolved_tasks=False,
-                timeout_deadline_at_ms=None,
-                timeout_limit_minutes=None,
             )
 
     def transition_captain(
@@ -699,18 +694,11 @@ class SQLiteQuestStore:
         recorded_at_ms: int,
         source_update_id: int | None,
         skipped_unsolved_tasks: bool = False,
-        timeout_deadline_at_ms: int | None = None,
-        timeout_limit_minutes: int | None = None,
     ) -> TransitionResult:
         self._validate_position_stage(expected_position, expected_stage_number)
         self._validate_position_stage(target_position, target_stage_number)
         if target_position is CaptainPosition.NOT_STARTED:
             raise ValueError("captains cannot transition back to not_started")
-        if target_position is CaptainPosition.TIMED_OUT:
-            if timeout_deadline_at_ms is None or timeout_limit_minutes is None:
-                raise ValueError("timeout transition requires its deadline and limit")
-        elif timeout_deadline_at_ms is not None or timeout_limit_minutes is not None:
-            raise ValueError("timeout metadata is valid only for timed_out")
 
         with self._transaction() as connection:
             if source_update_id is not None:
@@ -737,8 +725,6 @@ class SQLiteQuestStore:
                 recorded_at_ms=recorded_at_ms,
                 source_update_id=source_update_id,
                 skipped_unsolved_tasks=skipped_unsolved_tasks,
-                timeout_deadline_at_ms=timeout_deadline_at_ms,
-                timeout_limit_minutes=timeout_limit_minutes,
             )
 
     def claim_overdue_captains(self, now_ms: int) -> tuple[TransitionResult, ...]:
@@ -776,8 +762,6 @@ class SQLiteQuestStore:
                         recorded_at_ms=now_ms,
                         source_update_id=None,
                         skipped_unsolved_tasks=False,
-                        timeout_deadline_at_ms=state.started_at_ms + limit_ms,
-                        timeout_limit_minutes=limit_minutes,
                     )
                 )
             return tuple(results)
@@ -793,8 +777,6 @@ class SQLiteQuestStore:
         recorded_at_ms: int,
         source_update_id: int | None,
         skipped_unsolved_tasks: bool,
-        timeout_deadline_at_ms: int | None,
-        timeout_limit_minutes: int | None,
     ) -> TransitionResult:
         started_at_ms = state.started_at_ms
         if state.position is CaptainPosition.NOT_STARTED:
@@ -802,27 +784,18 @@ class SQLiteQuestStore:
                 raise StateConflictError("the first position must be intro")
             started_at_ms = recorded_at_ms
 
-        terminal_at_ms = recorded_at_ms if target_position.is_terminal else None
         connection.execute(
             """
             UPDATE captain_state
             SET position = ?,
                 started_at_ms = ?,
-                position_changed_at_ms = ?,
-                current_stage_number = ?,
-                terminal_at_ms = ?,
-                timeout_deadline_at_ms = ?,
-                timeout_limit_minutes = ?
+                current_stage_number = ?
             WHERE user_id = ?
             """,
             (
                 target_position.value,
                 started_at_ms,
-                recorded_at_ms,
                 target_stage_number,
-                terminal_at_ms,
-                timeout_deadline_at_ms,
-                timeout_limit_minutes,
                 state.user_id,
             ),
         )
@@ -1183,11 +1156,7 @@ class SQLiteQuestStore:
             user_id=int(row["user_id"]),
             position=CaptainPosition(str(row["position"])),
             started_at_ms=SQLiteQuestStore._optional_int(row["started_at_ms"]),
-            position_changed_at_ms=int(row["position_changed_at_ms"]),
             current_stage_number=SQLiteQuestStore._optional_int(row["current_stage_number"]),
-            terminal_at_ms=SQLiteQuestStore._optional_int(row["terminal_at_ms"]),
-            timeout_deadline_at_ms=SQLiteQuestStore._optional_int(row["timeout_deadline_at_ms"]),
-            timeout_limit_minutes=SQLiteQuestStore._optional_int(row["timeout_limit_minutes"]),
         )
 
     @staticmethod

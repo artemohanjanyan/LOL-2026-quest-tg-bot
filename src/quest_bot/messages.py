@@ -172,22 +172,19 @@ def status_stage(
     return "\n".join(lines)
 
 
-def status_finished(*, elapsed_seconds: int, score: int) -> str:
+def status_finished(*, score: int) -> str:
     return "\n".join(
         (
             "Позиція: подорож успішно завершено",
-            f"Час маршруту: {format_duration(elapsed_seconds)}",
             f"Бали: {score}",
         )
     )
 
 
-def status_timed_out(*, elapsed_seconds: int, limit_minutes: int, score: int) -> str:
+def status_timed_out(*, score: int) -> str:
     return "\n".join(
         (
             "Позиція: час подорожі вичерпано",
-            f"Час до останньої перевірки: {format_duration(elapsed_seconds)}",
-            f"Застосований ліміт: {limit_minutes} хв",
             f"Бали: {score}",
         )
     )

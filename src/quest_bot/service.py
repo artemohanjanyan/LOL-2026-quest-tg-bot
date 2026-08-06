@@ -129,7 +129,7 @@ class QuestService:
         source_update_id: int,
     ) -> StartResult:
         self.require_user(actor_id)
-        existing = self.store.ensure_captain_state(actor_id, self._clock())
+        existing = self.store.ensure_captain_state(actor_id)
         if existing.position is not CaptainPosition.NOT_STARTED:
             return StartResult(existing, self.store.get_intro_parts(), False)
         self._assert_quest_ready()
@@ -150,7 +150,7 @@ class QuestService:
         confirm_skip: bool = False,
     ) -> AdvanceResult:
         self.require_user(actor_id)
-        state = self.store.ensure_captain_state(actor_id, self._clock())
+        state = self.store.ensure_captain_state(actor_id)
         if state.position.is_terminal:
             raise InvalidQuestState("terminal")
         if state.position is CaptainPosition.NOT_STARTED:
@@ -250,7 +250,7 @@ class QuestService:
         self.require_user(actor_id)
         if task_number <= 0 or not raw_answer.strip():
             raise ContentValidationError("invalid answer")
-        state = self.store.ensure_captain_state(actor_id, self._clock())
+        state = self.store.ensure_captain_state(actor_id)
         if state.position.is_terminal:
             raise InvalidQuestState("terminal")
         if state.position is not CaptainPosition.STAGE or state.current_stage_number is None:
@@ -281,14 +281,14 @@ class QuestService:
 
     def get_stage(self, actor_id: int) -> StagePresentation:
         self.require_user(actor_id)
-        state = self.store.ensure_captain_state(actor_id, self._clock())
+        state = self.store.ensure_captain_state(actor_id)
         if state.position is not CaptainPosition.STAGE or state.current_stage_number is None:
             raise InvalidQuestState("no current stage")
         return self._presentation(state.current_stage_number)
 
     def get_intro(self, actor_id: int) -> tuple[ContentPart, ...]:
         self.require_user(actor_id)
-        state = self.store.ensure_captain_state(actor_id, self._clock())
+        state = self.store.ensure_captain_state(actor_id)
         if state.position is not CaptainPosition.INTRO:
             raise InvalidQuestState("not at intro")
         return self.store.get_intro_parts()
@@ -299,18 +299,11 @@ class QuestService:
 
     def _status_snapshot(self, user: User, *, now_ms: int | None = None) -> StatusSnapshot:
         now = self._clock() if now_ms is None else now_ms
-        state = self.store.ensure_captain_state(user.user_id, now)
+        state = self.store.ensure_captain_state(user.user_id)
         settings = self.store.get_settings()
-        limit = (
-            state.timeout_limit_minutes
-            if state.position is CaptainPosition.TIMED_OUT
-            and state.timeout_limit_minutes is not None
-            else settings.time_limit_minutes
-        )
         elapsed = 0
-        if state.started_at_ms is not None:
-            end = state.terminal_at_ms if state.terminal_at_ms is not None else now
-            elapsed = max(0, (end - state.started_at_ms) // 1_000)
+        if state.position.is_active and state.started_at_ms is not None:
+            elapsed = max(0, (now - state.started_at_ms) // 1_000)
         stage = None
         solved = 0
         total = 0
@@ -323,7 +316,7 @@ class QuestService:
             user=user,
             state=state,
             elapsed_seconds=elapsed,
-            limit_minutes=limit,
+            limit_minutes=settings.time_limit_minutes,
             total_score=self.store.get_total_score(user.user_id),
             stage=stage,
             solved_tasks=solved,
@@ -458,8 +451,6 @@ class QuestService:
                 summaries,
                 key=lambda item: (
                     -item.total_score,
-                    item.state.terminal_at_ms is None,
-                    item.state.terminal_at_ms or 0,
                     item.user.username.casefold(),
                 ),
             )
