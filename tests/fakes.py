@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
-from datetime import UTC, datetime
 from typing import Any
 
 from telegram import Update
@@ -182,6 +180,7 @@ class TelegramUser:
         self.username = username
         self._next_update_id = user_id * 1_000
         self._timestamp = timestamp
+        self._last_update: Update | None = None
 
     async def send(self, text: str) -> None:
         await self.send_message(text=text)
@@ -280,12 +279,10 @@ class TelegramUser:
             {"update_id": self._next_update_id, "message": message},
             self.application.bot,
         )
+        self._last_update = update
         await self.application.process_update(update)
 
-
-def joined_text(messages: Iterable[str]) -> str:
-    return "\n".join(messages).casefold()
-
-
-def utc_datetime(timestamp: int) -> datetime:
-    return datetime.fromtimestamp(timestamp, UTC)
+    async def replay_last_update(self) -> None:
+        if self._last_update is None:
+            raise RuntimeError("No Telegram update is available to replay")
+        await self.application.process_update(self._last_update)
