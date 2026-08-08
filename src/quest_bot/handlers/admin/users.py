@@ -17,6 +17,26 @@ from quest_bot.handlers.common import (
 )
 
 
+async def add_admin(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    deps: Dependencies,
+) -> None:
+    deps.service.require_owner_admin(actor_id(update))
+    args = command_args(context)
+    if len(args) != 2:
+        await send_text(update, deps, messages.USAGE_ADD_ADMIN)
+        return
+    try:
+        telegram_id = int(args[0])
+        user = deps.service.add_admin(actor_id(update), telegram_id, args[1])
+    except ValueError, ContentValidationError:
+        await send_text(update, deps, messages.USAGE_ADD_ADMIN)
+        return
+    await send_text(update, deps, messages.admin_added(user.username, user.user_id))
+
+
 async def add_captain(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -93,6 +113,7 @@ async def list_users(
 
 def build_handlers(deps: Dependencies) -> list[HandlerType]:
     return [
+        CommandHandler("add_admin", partial(add_admin, deps=deps)),
         CommandHandler("add_captain", partial(add_captain, deps=deps)),
         CommandHandler("remove_captain", partial(remove_captain, deps=deps)),
         CommandHandler("list_users", partial(list_users, deps=deps)),

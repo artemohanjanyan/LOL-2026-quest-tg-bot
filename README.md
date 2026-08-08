@@ -30,7 +30,8 @@ not persisted and interrupted deliveries are not resumed after restart.
 
 Users are authorized by stable Telegram user ID. Administrators can use captain
 commands and may enroll or deactivate captains without deleting their history.
-Run `/help` for the role-specific command list.
+Only the owner administrator configured through `QUEST_ADMIN_ID` may add other
+administrators. Run `/help` for the role-specific command list.
 
 Multipart `/set_intro`, `/set_success_outro`, `/set_timeout_outro`, `/set_task`,
 and `/broadcast` workflows accept text, photo, sticker, voice, document, video,

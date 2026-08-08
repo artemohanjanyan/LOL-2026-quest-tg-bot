@@ -59,11 +59,13 @@ async def bot_harness(
     seed_users(store)
     seed_ready_quest(store)
     clock = MutableClock()
-    service = QuestService(store, clock=clock)
+    service = QuestService(store, clock=clock, owner_admin_id=ADMIN_ID)
     application = create_application(
         Settings(
             token="999001:test-token",
             database_path=tmp_path / "quest.db",
+            bootstrap_admin_id=ADMIN_ID,
+            bootstrap_admin_username="organizer",
             sweep_interval_seconds=15,
         ),
         service,
@@ -293,6 +295,30 @@ async def test_add_captain_reuses_existing_username_when_omitted(
     assert captain.username == "passepartout"
     assert captain.active
     assert bot_harness.store.get_user(OTHER_CAPTAIN_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_only_owner_admin_can_add_admin_or_see_command(
+    bot_harness: BotHarness,
+) -> None:
+    owner = bot_harness.user(ADMIN_ID, "organizer")
+    await owner.send("/help")
+    assert "/add_admin" in bot_harness.telegram.messages_to(ADMIN_ID)[-1]
+
+    await owner.send(f"/add_admin {OTHER_CAPTAIN_ID} stationmaster")
+    added = bot_harness.store.get_user(OTHER_CAPTAIN_ID)
+    assert added is not None
+    assert added.role.value == "admin"
+    assert added.active
+
+    regular_admin = bot_harness.user(OTHER_CAPTAIN_ID, "stationmaster")
+    await regular_admin.send("/help")
+    await regular_admin.send("/add_admin 404 conductor")
+
+    regular_messages = bot_harness.telegram.messages_to(OTHER_CAPTAIN_ID)
+    assert "/add_admin" not in regular_messages[0]
+    assert regular_messages[1] == messages.PERMISSION_DENIED
+    assert bot_harness.store.get_user(404) is None
 
 
 @pytest.mark.asyncio

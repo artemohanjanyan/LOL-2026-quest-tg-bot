@@ -118,9 +118,11 @@ class QuestService:
         store: SQLiteQuestStore,
         *,
         clock: Callable[[], int] = utc_now_ms,
+        owner_admin_id: int | None = None,
     ) -> None:
         self.store = store
         self._clock = clock
+        self._owner_admin_id = owner_admin_id
 
     # Authorization ---------------------------------------------------------
 
@@ -137,6 +139,15 @@ class QuestService:
         if user.role is not UserRole.ADMIN:
             raise NotAuthorized
         return user
+
+    def require_owner_admin(self, actor_id: int) -> User:
+        user = self.require_admin(actor_id)
+        if actor_id != self._owner_admin_id:
+            raise NotAuthorized
+        return user
+
+    def is_owner_admin(self, actor_id: int) -> bool:
+        return actor_id == self._owner_admin_id
 
     # Captain flow ----------------------------------------------------------
 
@@ -335,6 +346,11 @@ class QuestService:
         )
 
     # Administration --------------------------------------------------------
+
+    def add_admin(self, actor_id: int, user_id: int, username: str) -> User:
+        self.require_owner_admin(actor_id)
+        self._validate_identity(user_id, username)
+        return self.store.ensure_admin(user_id, username.lstrip("@"), self._clock())
 
     def add_captain(self, actor_id: int, user_id: int, username: str | None = None) -> User:
         self.require_admin(actor_id)

@@ -232,7 +232,10 @@ async def help_command(
     await send_text(
         update,
         deps,
-        messages.help_message(is_admin=user.role is UserRole.ADMIN),
+        messages.help_message(
+            is_admin=user.role is UserRole.ADMIN,
+            is_owner_admin=deps.service.is_owner_admin(user.user_id),
+        ),
     )
 
 

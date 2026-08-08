@@ -29,7 +29,7 @@ def main() -> None:
                 settings.bootstrap_admin_username.lstrip("@"),
                 utc_now_ms(),
             )
-        service = QuestService(store)
+        service = QuestService(store, owner_admin_id=settings.bootstrap_admin_id)
         application = create_application(settings, service)
         logging.getLogger(__name__).info(
             "Starting quest bot %s with database %s at schema %s and %ss sweep",

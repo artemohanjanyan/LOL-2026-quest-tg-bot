@@ -37,33 +37,49 @@ CAPTAIN_HELP = """Команди капітана:
 ADMIN_HELP = f"""{CAPTAIN_HELP}
 
 Команди організатора:
+
+Учасники, результати й зв’язок:
 /add_captain <telegram_id> [username] — додати або активувати капітана
 /remove_captain <telegram_id> — деактивувати капітана
 /list_users — показати учасників
-/broadcast — підготувати оголошення
 /leaderboard — показати таблицю результатів
 /progress <username|telegram_id> — показати прогрес капітана
+/broadcast — підготувати оголошення
+
+Редагування маршруту:
 /set_intro — налаштувати вступ
 /set_success_outro — налаштувати успішний фінал
 /set_timeout_outro — налаштувати фінал за часом
 /set_stage <номер> <назва> — створити або перейменувати етап
 /set_task <етап> <завдання> — налаштувати завдання
-/correct_answer <відповідь> — задати правильну відповідь
 /delete_stage <номер> — видалити етап
 /delete_task <етап> <завдання> — видалити завдання
+
+Перевірка маршруту:
+/show_settings — показати налаштування й готовність маршруту
 /show_intro — показати вступ
 /show_success_outro — показати успішний фінал
 /show_timeout_outro — показати фінал за часом
 /list_stages — показати етапи
 /show_stage <номер> — показати етап
 /show_task <етап> <завдання> — показати завдання
-/show_settings — показати налаштування й готовність маршруту
+
+Правила експедиції:
 /set_scores <бали...> — налаштувати шкалу балів
 /set_time_limit <хвилини> — налаштувати тривалість подорожі
+
+Робота з чернеткою:
+/correct_answer <відповідь> — задати правильну відповідь
 /done — опублікувати чернетку
 /cancel — скасувати поточну операцію"""
 
+OWNER_ADMIN_HELP = f"""{ADMIN_HELP}
+
+Керування організаторами:
+/add_admin <telegram_id> <username> — додати організатора"""
+
 USAGE_ANSWER = "Формат: /answer <номер завдання> <відповідь>"
+USAGE_ADD_ADMIN = "Формат: /add_admin <telegram_id> <username>"
 USAGE_ADD_CAPTAIN = (
     "Формат: /add_captain <telegram_id> [username]. Username обов’язковий для нового капітана."
 )
@@ -80,10 +96,12 @@ USAGE_SET_SCORES = "Формат: /set_scores <бали за спроби чер
 USAGE_SET_TIME_LIMIT = "Формат: /set_time_limit <хвилини>"
 
 
-def help_message(*, is_admin: bool) -> str:
+def help_message(*, is_admin: bool, is_owner_admin: bool = False) -> str:
     """Return role-specific help while keeping command names in English."""
 
-    return ADMIN_HELP if is_admin else CAPTAIN_HELP
+    if not is_admin:
+        return CAPTAIN_HELP
+    return OWNER_ADMIN_HELP if is_owner_admin else ADMIN_HELP
 
 
 # Start, progress, and stage presentation -------------------------------------
@@ -256,6 +274,10 @@ CAPTAIN_NOT_FOUND = "Капітана не знайдено. Перевірте 
 
 def captain_added(username: str, telegram_id: int) -> str:
     return f"Капітана {username} ({telegram_id}) додано до експедиції."
+
+
+def admin_added(username: str, telegram_id: int) -> str:
+    return f"Організатора {username} ({telegram_id}) додано до штабу експедиції."
 
 
 def captain_removed(username: str, telegram_id: int) -> str:
