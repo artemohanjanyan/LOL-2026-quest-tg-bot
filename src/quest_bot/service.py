@@ -53,6 +53,7 @@ class AdvanceResult:
     unsolved_task_numbers: tuple[int, ...]
     finished: bool
     outro_parts: tuple[ContentPart, ...] = ()
+    final_score: int = 0
 
     @property
     def needs_confirmation(self) -> bool:
@@ -80,7 +81,7 @@ class StatusSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class TimeoutSweepResult:
-    expired_user_ids: tuple[int, ...]
+    expired_captains: tuple[tuple[int, int], ...]
     outro_parts: tuple[ContentPart, ...]
 
 
@@ -248,15 +249,17 @@ class QuestService:
             and actual_state.current_stage_number is not None
             else None
         )
+        finished = actual_state.position is CaptainPosition.FINISHED
         return AdvanceResult(
-            actual_state,
-            presentation,
-            (),
-            actual_state.position is CaptainPosition.FINISHED,
-            (
-                self.store.get_outro_parts(OutroKind.SUCCESS)
-                if actual_state.position is CaptainPosition.FINISHED
-                else ()
+            state=actual_state,
+            presentation=presentation,
+            unsolved_task_numbers=(),
+            finished=finished,
+            outro_parts=(self.store.get_outro_parts(OutroKind.SUCCESS) if finished else ()),
+            final_score=(
+                sum(item.points for item in self.store.list_task_progress(actor_id))
+                if finished
+                else 0
             ),
         )
 
@@ -554,7 +557,13 @@ class QuestService:
         if not expired:
             return TimeoutSweepResult((), ())
         return TimeoutSweepResult(
-            tuple(state.user_id for state in expired),
+            tuple(
+                (
+                    state.user_id,
+                    sum(item.points for item in self.store.list_task_progress(state.user_id)),
+                )
+                for state in expired
+            ),
             self.store.get_outro_parts(OutroKind.TIMEOUT),
         )
 

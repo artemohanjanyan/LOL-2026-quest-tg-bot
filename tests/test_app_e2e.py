@@ -547,6 +547,7 @@ async def test_finishing_after_deadline_before_sweep_prevents_timeout(
     await admin.send("/set_time_limit 1")
     await captain.send("/start")
     await captain.send("/next_stage")
+    await captain.send("/answer 1 80")
     bot_harness.clock.now_ms += 60_001
     await captain.send("/next_stage")
     bot_harness.telegram.clear()
@@ -555,8 +556,8 @@ async def test_finishing_after_deadline_before_sweep_prevents_timeout(
 
     assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
         messages.SKIP_CONFIRMED,
-        messages.QUEST_FINISHED,
         "SUCCESS OUTRO: Reform Club reached",
+        messages.final_score(10),
     ]
 
     bot_harness.telegram.clear()
@@ -564,7 +565,7 @@ async def test_finishing_after_deadline_before_sweep_prevents_timeout(
     assert post_init is not None
     await post_init(bot_harness.application)
     await captain.send("/status")
-    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.status_finished(score=0)]
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.status_finished(score=10)]
 
 
 @pytest.mark.asyncio
@@ -574,16 +575,23 @@ async def test_commands_work_after_deadline_until_sweep_claims_timeout(
     admin = bot_harness.user(ADMIN_ID, "organizer")
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
     await admin.send("/set_time_limit 1")
+    await admin.send(f"/add_captain {OTHER_CAPTAIN_ID} fix")
+    other_captain = bot_harness.user(OTHER_CAPTAIN_ID, "fix")
     await captain.send("/start")
     await captain.send("/next_stage")
+    await other_captain.send("/start")
+    await other_captain.send("/next_stage")
     bot_harness.clock.now_ms += 60_001
     bot_harness.telegram.clear()
 
     await captain.send("/answer 1 still travelling")
+    await captain.send("/answer 1 80")
     await captain.send("/status")
     before_sweep = bot_harness.telegram.messages_to(CAPTAIN_ID)
     assert before_sweep[0] == messages.answer_incorrect(attempt_number=1)
-    assert "Позиція: етап 1" in before_sweep[1]
+    assert before_sweep[1] == messages.answer_correct(points=8)
+    assert "Позиція: етап 1" in before_sweep[2]
+    assert "Бали: 8" in before_sweep[2]
 
     bot_harness.telegram.clear()
     post_init = bot_harness.application.post_init
@@ -591,14 +599,21 @@ async def test_commands_work_after_deadline_until_sweep_claims_timeout(
 
     await post_init(bot_harness.application)
 
-    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == ["TIMEOUT OUTRO: The clock wins"]
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
+        "TIMEOUT OUTRO: The clock wins",
+        messages.final_score(8),
+    ]
+    assert bot_harness.telegram.messages_to(OTHER_CAPTAIN_ID) == [
+        "TIMEOUT OUTRO: The clock wins",
+        messages.final_score(0),
+    ]
 
     bot_harness.telegram.clear()
     await captain.send("/answer 1 80")
     await captain.send("/status")
     assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
         messages.TERMINAL_PLAY_REJECTED,
-        messages.status_timed_out(score=0),
+        messages.status_timed_out(score=8),
     ]
 
 

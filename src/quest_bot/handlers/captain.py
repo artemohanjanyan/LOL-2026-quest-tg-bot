@@ -68,8 +68,8 @@ async def _deliver_advance(
             chat_id(update),
             (
                 *prefix,
-                ContentPart(ContentType.TEXT, messages.QUEST_FINISHED),
                 *result.outro_parts,
+                ContentPart(ContentType.TEXT, messages.final_score(result.final_score)),
             ),
         )
         return

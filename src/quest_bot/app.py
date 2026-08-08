@@ -6,10 +6,12 @@ import logging
 from telegram.ext import AIORateLimiter, ApplicationBuilder, ContextTypes
 from telegram.request import BaseRequest
 
+from quest_bot import messages
 from quest_bot.config import Settings
 from quest_bot.delivery import TelegramDelivery
 from quest_bot.handlers.common import ApplicationType, Dependencies
 from quest_bot.handlers.registry import COMMANDS, register_handlers
+from quest_bot.models import ContentPart, ContentType
 from quest_bot.service import QuestService
 
 LOGGER = logging.getLogger(__name__)
@@ -27,20 +29,28 @@ def _dependencies(application: ApplicationType) -> Dependencies:
 
 async def _run_timeout_sweep(deps: Dependencies) -> None:
     sweep = deps.service.sweep_timeouts()
-    if not sweep.expired_user_ids:
+    if not sweep.expired_captains:
         return
     semaphore = asyncio.Semaphore(OUTRO_CONCURRENCY)
 
-    async def deliver(user_id: int) -> tuple[int, int]:
+    async def deliver(user_id: int, score: int) -> tuple[int, int]:
         async with semaphore:
-            report = await deps.delivery.send_outro(user_id, sweep.outro_parts)
+            report = await deps.delivery.send_outro(
+                user_id,
+                (
+                    *sweep.outro_parts,
+                    ContentPart(ContentType.TEXT, messages.final_score(score)),
+                ),
+            )
             return report.sent_parts, report.failed_parts
 
-    reports = await asyncio.gather(*(deliver(user_id) for user_id in sweep.expired_user_ids))
+    reports = await asyncio.gather(
+        *(deliver(user_id, score) for user_id, score in sweep.expired_captains)
+    )
     LOGGER.info(
         "Quest timeout sweep completed",
         extra={
-            "expired_captains": len(sweep.expired_user_ids),
+            "expired_captains": len(sweep.expired_captains),
             "delivered_parts": sum(report[0] for report in reports),
             "failed_parts": sum(report[1] for report in reports),
         },

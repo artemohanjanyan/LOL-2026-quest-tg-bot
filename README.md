@@ -24,7 +24,9 @@ deadline until that sweep atomically commits `timed_out`. The same transaction
 does not perform network I/O; the configured timeout outro is sent immediately
 after the commit. Each outro part gets up to three in-memory attempts, respecting
 Telegram `retry_after` and using short backoff for network errors. Retry state is
-not persisted and interrupted deliveries are not resumed after restart.
+not persisted and interrupted deliveries are not resumed after restart. Both
+successful and timeout outros end with the captain's current score after all
+configured content parts.
 
 Every incoming Telegram update and outgoing message request/response is logged
 at `INFO` level. This deliberately includes message text, answers, captions, and
