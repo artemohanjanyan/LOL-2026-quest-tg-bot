@@ -15,7 +15,7 @@ from telegram.ext import (
 )
 
 from quest_bot import messages
-from quest_bot.errors import ContentValidationError
+from quest_bot.errors import ContentValidationError, NotFound
 from quest_bot.handlers.common import (
     Dependencies,
     HandlerType,
@@ -221,6 +221,9 @@ async def done(
     except ContentValidationError:
         await send_text(update, deps, "Чернетка не пройшла перевірку; виправте її вміст.")
         return DRAFT_CONTENT
+    except NotFound:
+        await send_text(update, deps, messages.STAGE_NOT_FOUND)
+        return DRAFT_CONTENT
     _clear_draft(update, context)
     if draft.kind is not DraftKind.BROADCAST:
         await send_text(update, deps, messages.DRAFT_PUBLISHED)
@@ -273,7 +276,7 @@ async def delete_stage(
     await send_text(
         update,
         deps,
-        messages.CONTENT_DELETED if deleted else messages.NO_CURRENT_STAGE,
+        messages.CONTENT_DELETED if deleted else messages.STAGE_NOT_FOUND,
     )
 
 
@@ -300,7 +303,7 @@ async def list_stages(
 ) -> None:
     stages = deps.service.list_stages(actor_id(update))
     if not stages:
-        await send_text(update, deps, messages.NO_STAGES)
+        await send_text(update, deps, messages.NO_CONFIGURED_STAGES)
         return
     await send_text(
         update,
@@ -320,7 +323,11 @@ async def show_stage(
         await send_text(update, deps, messages.USAGE_SHOW_STAGE)
         return
     (stage_number,) = numbers
-    presentation = deps.service.show_stage(actor_id(update), stage_number)
+    try:
+        presentation = deps.service.show_stage(actor_id(update), stage_number)
+    except NotFound:
+        await send_text(update, deps, messages.STAGE_NOT_FOUND)
+        return
     await send_stage(update, deps, presentation)
     for task in presentation.tasks:
         await send_text(

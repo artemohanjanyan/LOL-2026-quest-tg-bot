@@ -81,7 +81,6 @@ async def test_start_sends_intro_and_repeated_start_does_not_reset_timer(
     bot_harness: BotHarness,
 ) -> None:
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
-    bot_harness.telegram.clear()
 
     await captain.send("/start")
 
@@ -99,6 +98,21 @@ async def test_start_sends_intro_and_repeated_start_does_not_reset_timer(
     assert repeated[0] == messages.QUEST_ALREADY_STARTED
     assert "INTRO: Pack your carpetbag" in repeated
     assert "Час у дорозі: 00:10" in repeated[-1]
+
+
+@pytest.mark.asyncio
+async def test_unknown_commands_and_messages_receive_guidance(
+    bot_harness: BotHarness,
+) -> None:
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+
+    await captain.send("/take_a_detour")
+    await captain.send("Is this the right train?")
+
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
+        messages.UNKNOWN_COMMAND,
+        messages.UNKNOWN_MESSAGE,
+    ]
 
 
 @pytest.mark.asyncio
@@ -248,7 +262,6 @@ async def test_captain_cannot_use_admin_content_command(
 ) -> None:
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
     admin = bot_harness.user(ADMIN_ID, "organizer")
-    bot_harness.telegram.clear()
 
     await captain.send("/set_stage 2 Париж")
 
@@ -258,6 +271,38 @@ async def test_captain_cannot_use_admin_content_command(
     visible_stages = bot_harness.telegram.messages_to(ADMIN_ID)[-1]
     assert "Лондон" in visible_stages
     assert "Париж" not in visible_stages
+
+
+@pytest.mark.asyncio
+async def test_empty_stage_list_uses_admin_facing_copy(bot_harness: BotHarness) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    await admin.send("/delete_stage 1")
+    bot_harness.telegram.clear()
+
+    await admin.send("/list_stages")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [messages.NO_CONFIGURED_STAGES]
+
+
+@pytest.mark.asyncio
+async def test_missing_stage_uses_admin_facing_copy(bot_harness: BotHarness) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+
+    await admin.send("/delete_stage 99")
+    await admin.send("/show_stage 99")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        messages.STAGE_NOT_FOUND,
+        messages.STAGE_NOT_FOUND,
+    ]
+
+    await admin.send("/set_task 99 1")
+    await admin.send("A task for a missing stage")
+    await admin.send("/correct_answer answer")
+    bot_harness.telegram.clear()
+    await admin.send("/done")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [messages.STAGE_NOT_FOUND]
 
 
 @pytest.mark.asyncio
