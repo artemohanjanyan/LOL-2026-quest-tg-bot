@@ -375,8 +375,6 @@ class QuestService:
     def captain_reset_target(self, actor_id: int, reference: str) -> tuple[User, CaptainState]:
         self.require_admin(actor_id)
         target = self.resolve_user(reference)
-        if target.role is not UserRole.CAPTAIN:
-            raise NotFound("captain")
         return target, self.store.get_captain_state(target.user_id)
 
     def reset_captain(
@@ -389,7 +387,7 @@ class QuestService:
     ) -> User:
         self.require_admin(actor_id)
         target = self.store.get_user(expected_state.user_id)
-        if target is None or target.role is not UserRole.CAPTAIN:
+        if target is None:
             raise NotFound("captain")
         try:
             self.store.reset_captain(

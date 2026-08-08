@@ -400,6 +400,31 @@ async def test_reset_captain_requires_confirmation_and_can_be_cancelled(
 
 
 @pytest.mark.asyncio
+async def test_reset_captain_accepts_admin_role_target(bot_harness: BotHarness) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    await admin.send("/start")
+    await admin.send("/next_stage")
+    await admin.send("/answer 1 80")
+    await admin.send("/next_stage")
+    await admin.send("/confirm_next_stage")
+    assert bot_harness.store.get_captain_state(ADMIN_ID).position is CaptainPosition.FINISHED
+    bot_harness.telegram.clear()
+
+    await admin.send(f"/reset_captain {ADMIN_ID}")
+    await admin.send("/confirm_reset_captain")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        messages.captain_reset_warning("organizer", ADMIN_ID),
+        messages.captain_reset("organizer", ADMIN_ID),
+    ]
+    user = bot_harness.store.get_user(ADMIN_ID)
+    assert user is not None
+    assert user.role.value == "admin"
+    assert bot_harness.store.get_captain_state(ADMIN_ID).position is CaptainPosition.NOT_STARTED
+    assert bot_harness.store.get_attempt_counts(ADMIN_ID, 1) == ()
+
+
+@pytest.mark.asyncio
 async def test_reset_confirmation_expires_when_captain_changes_stage(
     bot_harness: BotHarness,
 ) -> None:
