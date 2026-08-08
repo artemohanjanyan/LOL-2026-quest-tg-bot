@@ -1,6 +1,7 @@
 import time
-from dataclasses import dataclass
 from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict
 
 
 class UserRole(StrEnum):
@@ -45,45 +46,43 @@ def utc_now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
-@dataclass(frozen=True, slots=True)
-class User:
+class FrozenModel(BaseModel):
+    model_config = ConfigDict(frozen=True, from_attributes=True)
+
+
+class User(FrozenModel):
     user_id: int
     username: str
     role: UserRole
     active: bool
 
 
-@dataclass(frozen=True, slots=True)
-class ContentPart:
+class ContentPart(FrozenModel):
     content_type: ContentType
     data: str
     caption: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class Stage:
+class Stage(FrozenModel):
     stage_number: int
     name: str
 
 
-@dataclass(frozen=True, slots=True)
-class Task:
+class Task(FrozenModel):
     stage_number: int
     task_number: int
     correct_answer_raw: str
     prompt_parts: tuple[ContentPart, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class CaptainState:
+class CaptainState(FrozenModel):
     user_id: int
     position: CaptainPosition
     started_at_ms: int | None
     current_stage_number: int | None
 
 
-@dataclass(frozen=True, slots=True)
-class CaptainTransition:
+class CaptainTransition(FrozenModel):
     transition_id: int
     user_id: int
     sequence_number: int
@@ -97,14 +96,12 @@ class CaptainTransition:
     skipped_unsolved_tasks: bool
 
 
-@dataclass(frozen=True, slots=True)
-class RecordedAttempt:
+class RecordedAttempt(FrozenModel):
     attempt_number: int
     correct: bool
 
 
-@dataclass(frozen=True, slots=True)
-class TaskProgress:
+class TaskProgress(FrozenModel):
     stage_number: int
     task_number: int
     solved_attempt_number: int | None
@@ -115,8 +112,7 @@ class TaskProgress:
         return self.solved_attempt_number is not None
 
 
-@dataclass(frozen=True, slots=True)
-class CaptainSummary:
+class CaptainSummary(FrozenModel):
     user: User
     state: CaptainState
     solved_tasks: int

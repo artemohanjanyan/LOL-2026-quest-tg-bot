@@ -1,10 +1,10 @@
 """Shared Telegram-boundary helpers and dependency container."""
 
 import logging
-from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
+from pydantic import ConfigDict
 from telegram import Message, Update
 from telegram.ext import Application, BaseHandler, ContextTypes, ExtBot, JobQueue
 
@@ -20,7 +20,7 @@ from quest_bot.errors import (
     UnknownUser,
     UsageError,
 )
-from quest_bot.models import CaptainPosition, ContentPart, ContentType
+from quest_bot.models import CaptainPosition, ContentPart, ContentType, FrozenModel
 from quest_bot.service import QuestService, StagePresentation, StatusSnapshot
 
 LOGGER = logging.getLogger(__name__)
@@ -35,8 +35,9 @@ type ApplicationType = Application[
 type HandlerType = BaseHandler[Update, ContextTypes.DEFAULT_TYPE, object]
 
 
-@dataclass(frozen=True, slots=True)
-class Dependencies:
+class Dependencies(FrozenModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     service: QuestService
     delivery: TelegramDelivery
 
@@ -108,7 +109,10 @@ def user_data(context: ContextTypes.DEFAULT_TYPE) -> dict[Any, Any]:
 
 
 async def send_text(update: Update, deps: Dependencies, text: str) -> None:
-    await deps.delivery.send_part(chat_id(update), ContentPart(ContentType.TEXT, text))
+    await deps.delivery.send_part(
+        chat_id(update),
+        ContentPart(content_type=ContentType.TEXT, data=text),
+    )
 
 
 async def send_stage(update: Update, deps: Dependencies, presentation: StagePresentation) -> None:
@@ -164,22 +168,30 @@ def render_status(snapshot: StatusSnapshot) -> str:
     )
 
 
+def _content_part(
+    content_type: ContentType,
+    data: str,
+    caption: str | None = None,
+) -> ContentPart:
+    return ContentPart(content_type=content_type, data=data, caption=caption)
+
+
 def content_part_from_message(message: Message) -> ContentPart | None:
     caption = message.caption
     if message.text is not None:
-        return ContentPart(ContentType.TEXT, message.text)
+        return _content_part(ContentType.TEXT, message.text)
     if message.photo:
-        return ContentPart(ContentType.PHOTO, message.photo[-1].file_id, caption)
+        return _content_part(ContentType.PHOTO, message.photo[-1].file_id, caption)
     if message.sticker is not None:
-        return ContentPart(ContentType.STICKER, message.sticker.file_id)
+        return _content_part(ContentType.STICKER, message.sticker.file_id)
     if message.voice is not None:
-        return ContentPart(ContentType.VOICE, message.voice.file_id, caption)
+        return _content_part(ContentType.VOICE, message.voice.file_id, caption)
     if message.document is not None:
-        return ContentPart(ContentType.DOCUMENT, message.document.file_id, caption)
+        return _content_part(ContentType.DOCUMENT, message.document.file_id, caption)
     if message.video is not None:
-        return ContentPart(ContentType.VIDEO, message.video.file_id, caption)
+        return _content_part(ContentType.VIDEO, message.video.file_id, caption)
     if message.video_note is not None:
-        return ContentPart(ContentType.VIDEO_NOTE, message.video_note.file_id)
+        return _content_part(ContentType.VIDEO_NOTE, message.video_note.file_id)
     return None
 
 

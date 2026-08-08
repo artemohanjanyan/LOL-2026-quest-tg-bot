@@ -1,17 +1,16 @@
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
-import pytest_asyncio
+from pydantic import BaseModel, ConfigDict
 from telegram.ext import Application
 
 from quest_bot import messages
 from quest_bot.app import create_application
 from quest_bot.config import Settings
 from quest_bot.service import QuestService
-from quest_bot.storage.sqlite import SQLiteQuestStore
+from quest_bot.storage import QuestStore
 from tests.fakes import FakeTelegramRequest, TelegramUser
 from tests.quest_setup import (
     ADMIN_ID,
@@ -26,19 +25,19 @@ from tests.quest_setup import (
 type TestApplication = Application[Any, Any, Any, Any, Any, Any]
 
 
-@dataclass(slots=True)
-class MutableClock:
+class MutableClock(BaseModel):
     now_ms: int = BASE_TIME_MS
 
     def __call__(self) -> int:
         return self.now_ms
 
 
-@dataclass(slots=True)
-class BotHarness:
+class BotHarness(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
     application: TestApplication
     telegram: FakeTelegramRequest
-    store: SQLiteQuestStore
+    store: QuestStore
     clock: MutableClock
 
     def user(self, user_id: int, username: str) -> TelegramUser:
@@ -50,12 +49,12 @@ class BotHarness:
         )
 
 
-@pytest_asyncio.fixture
+@pytest.fixture
 async def bot_harness(
     tmp_path: Path,
     telegram_request: FakeTelegramRequest,
 ) -> AsyncIterator[BotHarness]:
-    store = SQLiteQuestStore.open(tmp_path / "quest.db", lock_instance=False)
+    store = QuestStore.open(tmp_path / "quest.db", lock_instance=False)
     seed_users(store)
     seed_ready_quest(store)
     clock = MutableClock()
@@ -64,19 +63,27 @@ async def bot_harness(
         Settings(
             token="999001:test-token",
             database_path=tmp_path / "quest.db",
+            bootstrap_admin_id=None,
+            bootstrap_admin_username="admin",
             sweep_interval_seconds=15,
+            database_busy_timeout_ms=5_000,
+            delivery_rate_per_second=20,
         ),
         service,
         request=telegram_request,
     )
     try:
         async with application:
-            yield BotHarness(application, telegram_request, store, clock)
+            yield BotHarness(
+                application=application,
+                telegram=telegram_request,
+                store=store,
+                clock=clock,
+            )
     finally:
         store.close()
 
 
-@pytest.mark.asyncio
 async def test_start_sends_intro_and_repeated_start_does_not_reset_timer(
     bot_harness: BotHarness,
 ) -> None:
@@ -101,7 +108,6 @@ async def test_start_sends_intro_and_repeated_start_does_not_reset_timer(
     assert "Час у дорозі: 00:10" in repeated[-1]
 
 
-@pytest.mark.asyncio
 async def test_next_stage_prints_name_labels_and_every_task_prompt(
     bot_harness: BotHarness,
 ) -> None:
@@ -132,7 +138,6 @@ async def test_next_stage_prints_name_labels_and_every_task_prompt(
     assert calls[-1][1]["video"] == "telegram-video-id"
 
 
-@pytest.mark.asyncio
 async def test_answers_and_live_configuration_recalculate_visible_score(
     bot_harness: BotHarness,
 ) -> None:
@@ -175,7 +180,6 @@ async def test_answers_and_live_configuration_recalculate_visible_score(
     assert "Завдання: 1 із 2 розв’язано" in recalculated
 
 
-@pytest.mark.asyncio
 async def test_duplicate_answer_update_does_not_create_another_attempt(
     bot_harness: BotHarness,
 ) -> None:
@@ -198,7 +202,6 @@ async def test_duplicate_answer_update_does_not_create_another_attempt(
     assert "№1: 1 спроб" in progress
 
 
-@pytest.mark.asyncio
 async def test_zero_point_correct_answer_still_solves_task(bot_harness: BotHarness) -> None:
     admin = bot_harness.user(ADMIN_ID, "organizer")
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
@@ -215,7 +218,6 @@ async def test_zero_point_correct_answer_still_solves_task(bot_harness: BotHarne
     assert "Бали: 0" in sent[-1]
 
 
-@pytest.mark.asyncio
 async def test_unresolved_advance_requires_confirmation_then_prints_next_stage(
     bot_harness: BotHarness,
 ) -> None:
@@ -242,7 +244,6 @@ async def test_unresolved_advance_requires_confirmation_then_prints_next_stage(
     assert calls[-1][0] == "sendVideoNote"
 
 
-@pytest.mark.asyncio
 async def test_captain_cannot_use_admin_content_command(
     bot_harness: BotHarness,
 ) -> None:
@@ -260,7 +261,6 @@ async def test_captain_cannot_use_admin_content_command(
     assert "Париж" not in visible_stages
 
 
-@pytest.mark.asyncio
 async def test_admin_can_publish_multipart_intro_through_conversation(
     bot_harness: BotHarness,
 ) -> None:
@@ -290,7 +290,6 @@ async def test_admin_can_publish_multipart_intro_through_conversation(
     ]
 
 
-@pytest.mark.asyncio
 async def test_application_post_init_registers_independent_timeout_sweep(
     bot_harness: BotHarness,
 ) -> None:
@@ -306,7 +305,6 @@ async def test_application_post_init_registers_independent_timeout_sweep(
     assert "setMyCommands" in control_methods
 
 
-@pytest.mark.asyncio
 async def test_finishing_after_deadline_before_sweep_prevents_timeout(
     bot_harness: BotHarness,
 ) -> None:
@@ -335,7 +333,6 @@ async def test_finishing_after_deadline_before_sweep_prevents_timeout(
     assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.status_finished(score=0)]
 
 
-@pytest.mark.asyncio
 async def test_commands_work_after_deadline_until_sweep_claims_timeout(
     bot_harness: BotHarness,
 ) -> None:
@@ -370,7 +367,6 @@ async def test_commands_work_after_deadline_until_sweep_claims_timeout(
     ]
 
 
-@pytest.mark.asyncio
 async def test_leaderboard_orders_by_score_then_username(
     bot_harness: BotHarness,
 ) -> None:

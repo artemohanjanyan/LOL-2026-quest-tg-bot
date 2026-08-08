@@ -1,7 +1,6 @@
 """Quest rules and orchestration independent of Telegram update objects."""
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 
 from quest_bot.errors import (
     ContentValidationError,
@@ -17,6 +16,7 @@ from quest_bot.models import (
     CaptainState,
     CaptainSummary,
     ContentPart,
+    FrozenModel,
     OutroKind,
     Stage,
     Task,
@@ -24,30 +24,27 @@ from quest_bot.models import (
     UserRole,
     utc_now_ms,
 )
-from quest_bot.storage.base import (
+from quest_bot.storage import QuestStore
+from quest_bot.storage.errors import (
     RecordNotFoundError,
     StateConflictError,
     TaskAlreadySolvedError,
     TaskLimitExceededError,
 )
-from quest_bot.storage.sqlite import SQLiteQuestStore
 
 
-@dataclass(frozen=True, slots=True)
-class StartResult:
+class StartResult(FrozenModel):
     state: CaptainState
     intro_parts: tuple[ContentPart, ...]
     started: bool
 
 
-@dataclass(frozen=True, slots=True)
-class StagePresentation:
+class StagePresentation(FrozenModel):
     stage: Stage
     tasks: tuple[Task, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class AdvanceResult:
+class AdvanceResult(FrozenModel):
     state: CaptainState
     presentation: StagePresentation | None
     unsolved_task_numbers: tuple[int, ...]
@@ -59,15 +56,13 @@ class AdvanceResult:
         return bool(self.unsolved_task_numbers)
 
 
-@dataclass(frozen=True, slots=True)
-class AnswerResult:
+class AnswerResult(FrozenModel):
     attempt_number: int
     correct: bool
     points: int
 
 
-@dataclass(frozen=True, slots=True)
-class StatusSnapshot:
+class StatusSnapshot(FrozenModel):
     user: User
     state: CaptainState
     elapsed_seconds: int
@@ -78,8 +73,7 @@ class StatusSnapshot:
     total_tasks: int = 0
 
 
-@dataclass(frozen=True, slots=True)
-class TimeoutSweepResult:
+class TimeoutSweepResult(FrozenModel):
     expired_user_ids: tuple[int, ...]
     outro_parts: tuple[ContentPart, ...]
 
@@ -89,7 +83,7 @@ class QuestService:
 
     def __init__(
         self,
-        store: SQLiteQuestStore,
+        store: QuestStore,
         *,
         clock: Callable[[], int] = utc_now_ms,
     ) -> None:
@@ -124,7 +118,11 @@ class QuestService:
         self.require_user(actor_id)
         existing = self.store.get_captain_state(actor_id)
         if existing.position is not CaptainPosition.NOT_STARTED:
-            return StartResult(existing, self.store.get_intro_parts(), False)
+            return StartResult(
+                state=existing,
+                intro_parts=self.store.get_intro_parts(),
+                started=False,
+            )
         self._assert_quest_ready()
         try:
             state = self.store.transition_captain(
@@ -139,9 +137,11 @@ class QuestService:
             )
         except StateConflictError:
             return StartResult(
-                self.store.get_captain_state(actor_id), self.store.get_intro_parts(), False
+                state=self.store.get_captain_state(actor_id),
+                intro_parts=self.store.get_intro_parts(),
+                started=False,
             )
-        return StartResult(state, self.store.get_intro_parts(), True)
+        return StartResult(state=state, intro_parts=self.store.get_intro_parts(), started=True)
 
     def advance(
         self,
@@ -176,7 +176,12 @@ class QuestService:
                 if item.stage_number == state.current_stage_number and not item.solved
             )
             if unsolved and not confirm_skip:
-                return AdvanceResult(state, None, unsolved, False)
+                return AdvanceResult(
+                    state=state,
+                    presentation=None,
+                    unsolved_task_numbers=unsolved,
+                    finished=False,
+                )
             skipped = bool(unsolved)
             next_stage = next(
                 (stage for stage in stages if stage.stage_number > state.current_stage_number),
@@ -212,11 +217,11 @@ class QuestService:
             else None
         )
         return AdvanceResult(
-            actual_state,
-            presentation,
-            (),
-            actual_state.position is CaptainPosition.FINISHED,
-            (
+            state=actual_state,
+            presentation=presentation,
+            unsolved_task_numbers=(),
+            finished=actual_state.position is CaptainPosition.FINISHED,
+            outro_parts=(
                 self.store.get_outro_parts(OutroKind.SUCCESS)
                 if actual_state.position is CaptainPosition.FINISHED
                 else ()
@@ -260,7 +265,11 @@ class QuestService:
         score_steps = self.store.get_score_steps()
         index = stored.attempt_number - 1
         points = score_steps[index] if stored.correct and index < len(score_steps) else 0
-        return AnswerResult(stored.attempt_number, stored.correct, points)
+        return AnswerResult(
+            attempt_number=stored.attempt_number,
+            correct=stored.correct,
+            points=points,
+        )
 
     def get_stage(self, actor_id: int) -> StagePresentation:
         self.require_user(actor_id)
@@ -471,10 +480,10 @@ class QuestService:
     def sweep_timeouts(self) -> TimeoutSweepResult:
         expired = self.store.claim_overdue_captains(self._clock())
         if not expired:
-            return TimeoutSweepResult((), ())
+            return TimeoutSweepResult(expired_user_ids=(), outro_parts=())
         return TimeoutSweepResult(
-            tuple(state.user_id for state in expired),
-            self.store.get_outro_parts(OutroKind.TIMEOUT),
+            expired_user_ids=tuple(state.user_id for state in expired),
+            outro_parts=self.store.get_outro_parts(OutroKind.TIMEOUT),
         )
 
     # Internal helpers ------------------------------------------------------
@@ -495,7 +504,10 @@ class QuestService:
         stage = self.store.get_stage(stage_number)
         if stage is None:
             raise NotFound("stage")
-        return StagePresentation(stage, self.store.list_stage_tasks(stage_number))
+        return StagePresentation(
+            stage=stage,
+            tasks=self.store.list_stage_tasks(stage_number),
+        )
 
     @staticmethod
     def _validate_parts(parts: Sequence[ContentPart]) -> None:

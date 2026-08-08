@@ -1,6 +1,5 @@
-from dataclasses import dataclass, field
-
 import pytest
+from pydantic import BaseModel, Field
 from telegram import Bot
 from telegram.warnings import PTBDeprecationWarning
 
@@ -9,27 +8,29 @@ from quest_bot.models import ContentPart, ContentType
 from tests.fakes import FakeTelegramRequest
 
 
-@dataclass(slots=True)
-class RecordingSleep:
-    delays: list[float] = field(default_factory=list)
+class RecordingSleep(BaseModel):
+    delays: list[float] = Field(default_factory=list)
 
     async def __call__(self, delay: float) -> None:
         self.delays.append(delay)
 
 
-@pytest.mark.asyncio
 async def test_ordered_delivery_supports_all_quest_content_types(
     telegram_request: FakeTelegramRequest,
 ) -> None:
     bot = Bot("999001:test-token", request=telegram_request)
     parts = (
-        ContentPart(ContentType.TEXT, "Board the train"),
-        ContentPart(ContentType.PHOTO, "photo-id", "map"),
-        ContentPart(ContentType.STICKER, "sticker-id"),
-        ContentPart(ContentType.VOICE, "voice-id", "dispatch"),
-        ContentPart(ContentType.DOCUMENT, "document-id", "tickets.pdf"),
-        ContentPart(ContentType.VIDEO, "video-id", "crossing"),
-        ContentPart(ContentType.VIDEO_NOTE, "video-note-id"),
+        ContentPart(content_type=ContentType.TEXT, data="Board the train"),
+        ContentPart(content_type=ContentType.PHOTO, data="photo-id", caption="map"),
+        ContentPart(content_type=ContentType.STICKER, data="sticker-id"),
+        ContentPart(content_type=ContentType.VOICE, data="voice-id", caption="dispatch"),
+        ContentPart(
+            content_type=ContentType.DOCUMENT,
+            data="document-id",
+            caption="tickets.pdf",
+        ),
+        ContentPart(content_type=ContentType.VIDEO, data="video-id", caption="crossing"),
+        ContentPart(content_type=ContentType.VIDEO_NOTE, data="video-note-id"),
     )
 
     async with bot:
@@ -52,7 +53,6 @@ async def test_ordered_delivery_supports_all_quest_content_types(
     assert calls[6][1]["video_note"] == "video-note-id"
 
 
-@pytest.mark.asyncio
 async def test_outro_retries_network_error_without_resending_prior_parts(
     telegram_request: FakeTelegramRequest,
 ) -> None:
@@ -64,9 +64,9 @@ async def test_outro_retries_network_error_without_resending_prior_parts(
         description="Temporary Telegram outage",
     )
     parts = (
-        ContentPart(ContentType.TEXT, "The first dispatch"),
-        ContentPart(ContentType.DOCUMENT, "tickets-pdf"),
-        ContentPart(ContentType.VIDEO, "arrival-video"),
+        ContentPart(content_type=ContentType.TEXT, data="The first dispatch"),
+        ContentPart(content_type=ContentType.DOCUMENT, data="tickets-pdf"),
+        ContentPart(content_type=ContentType.VIDEO, data="arrival-video"),
     )
 
     async with bot:
@@ -84,7 +84,6 @@ async def test_outro_retries_network_error_without_resending_prior_parts(
     assert sleep.delays == [1]
 
 
-@pytest.mark.asyncio
 async def test_outro_retry_after_uses_exact_injected_sleep(
     telegram_request: FakeTelegramRequest,
 ) -> None:
@@ -101,7 +100,7 @@ async def test_outro_retry_after_uses_exact_injected_sleep(
         with pytest.warns(PTBDeprecationWarning):
             report = await TelegramDelivery(bot, sleep=sleep).send_outro(
                 202,
-                (ContentPart(ContentType.TEXT, "final dispatch"),),
+                (ContentPart(content_type=ContentType.TEXT, data="final dispatch"),),
             )
 
     assert report.sent_parts == 1
@@ -114,7 +113,6 @@ async def test_outro_retry_after_uses_exact_injected_sleep(
     ]
 
 
-@pytest.mark.asyncio
 async def test_outro_permanent_part_error_continues_with_later_parts(
     telegram_request: FakeTelegramRequest,
 ) -> None:
@@ -130,8 +128,8 @@ async def test_outro_permanent_part_error_continues_with_later_parts(
         report = await TelegramDelivery(bot, sleep=sleep).send_outro(
             202,
             (
-                ContentPart(ContentType.DOCUMENT, "bad-document"),
-                ContentPart(ContentType.TEXT, "The rest of the outro"),
+                ContentPart(content_type=ContentType.DOCUMENT, data="bad-document"),
+                ContentPart(content_type=ContentType.TEXT, data="The rest of the outro"),
             ),
         )
 
@@ -145,7 +143,6 @@ async def test_outro_permanent_part_error_continues_with_later_parts(
     ]
 
 
-@pytest.mark.asyncio
 async def test_outro_exhausts_three_network_attempts_then_continues(
     telegram_request: FakeTelegramRequest,
 ) -> None:
@@ -162,8 +159,8 @@ async def test_outro_exhausts_three_network_attempts_then_continues(
         report = await TelegramDelivery(bot, sleep=sleep).send_outro(
             202,
             (
-                ContentPart(ContentType.DOCUMENT, "unavailable-document"),
-                ContentPart(ContentType.TEXT, "Continue after the document"),
+                ContentPart(content_type=ContentType.DOCUMENT, data="unavailable-document"),
+                ContentPart(content_type=ContentType.TEXT, data="Continue after the document"),
             ),
         )
 
@@ -179,7 +176,6 @@ async def test_outro_exhausts_three_network_attempts_then_continues(
     ]
 
 
-@pytest.mark.asyncio
 async def test_outro_forbidden_aborts_without_sending_later_parts(
     telegram_request: FakeTelegramRequest,
 ) -> None:
@@ -195,9 +191,9 @@ async def test_outro_forbidden_aborts_without_sending_later_parts(
         report = await TelegramDelivery(bot, sleep=sleep).send_outro(
             202,
             (
-                ContentPart(ContentType.TEXT, "Already delivered"),
-                ContentPart(ContentType.DOCUMENT, "blocked-document"),
-                ContentPart(ContentType.VIDEO, "must-not-be-sent"),
+                ContentPart(content_type=ContentType.TEXT, data="Already delivered"),
+                ContentPart(content_type=ContentType.DOCUMENT, data="blocked-document"),
+                ContentPart(content_type=ContentType.VIDEO, data="must-not-be-sent"),
             ),
         )
 

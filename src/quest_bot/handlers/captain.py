@@ -62,12 +62,16 @@ async def _deliver_advance(
 ) -> None:
     _clear_pending_skip(update, context)
     if result.finished:
-        prefix = (ContentPart(ContentType.TEXT, messages.SKIP_CONFIRMED),) if skipped else ()
+        prefix = (
+            (ContentPart(content_type=ContentType.TEXT, data=messages.SKIP_CONFIRMED),)
+            if skipped
+            else ()
+        )
         await deps.delivery.send_outro(
             chat_id(update),
             (
                 *prefix,
-                ContentPart(ContentType.TEXT, messages.QUEST_FINISHED),
+                ContentPart(content_type=ContentType.TEXT, data=messages.QUEST_FINISHED),
                 *result.outro_parts,
             ),
         )

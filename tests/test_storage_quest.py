@@ -1,13 +1,15 @@
+import logging
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from quest_bot.models import CaptainPosition, ContentPart, ContentType
 from quest_bot.service import QuestService
-from quest_bot.storage.base import TaskLimitExceededError
-from quest_bot.storage.sqlite import SQLiteQuestStore
+from quest_bot.storage import QuestStore
+from quest_bot.storage.errors import InstanceAlreadyRunningError, TaskLimitExceededError
 from tests.quest_setup import (
     BASE_TIME_MS,
     CAPTAIN_ID,
@@ -17,15 +19,15 @@ from tests.quest_setup import (
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[SQLiteQuestStore]:
-    database = SQLiteQuestStore.open(tmp_path / "quest.db", lock_instance=False)
+def store(tmp_path: Path) -> Iterator[QuestStore]:
+    database = QuestStore.open(tmp_path / "quest.db", lock_instance=False)
     try:
         yield database
     finally:
         database.close()
 
 
-def start_and_enter_first_stage(store: SQLiteQuestStore) -> None:
+def start_and_enter_first_stage(store: QuestStore) -> None:
     started = store.transition_captain(
         CAPTAIN_ID,
         expected_position=CaptainPosition.NOT_STARTED,
@@ -51,8 +53,33 @@ def start_and_enter_first_stage(store: SQLiteQuestStore) -> None:
     assert entered.position is CaptainPosition.STAGE
 
 
+def test_store_runs_migrations_and_holds_the_instance_lock(tmp_path: Path) -> None:
+    path = tmp_path / "locked.db"
+    with QuestStore.open(path) as first:
+        assert first.schema_revision == "20260808_01"
+        with pytest.raises(InstanceAlreadyRunningError):
+            QuestStore.open(path)
+
+    with QuestStore.open(path) as reopened:
+        assert reopened.schema_revision == "20260808_01"
+
+
+def test_database_errors_log_transaction_state_and_roll_back(
+    store: QuestStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with (
+        caplog.at_level(logging.ERROR, logger="quest_bot.storage.store"),
+        pytest.raises(IntegrityError),
+    ):
+        store.set_time_limit(0)
+
+    assert "in_transaction=True" in caplog.text
+    assert store.get_time_limit() == 80
+
+
 def test_transition_history_preserves_metadata_and_update_idempotency(
-    store: SQLiteQuestStore,
+    store: QuestStore,
 ) -> None:
     seed_users(store)
     seed_ready_quest(store)
@@ -99,7 +126,7 @@ def test_transition_history_preserves_metadata_and_update_idempotency(
     assert history[-1].skipped_unsolved_tasks
 
 
-def test_timeout_claim_and_history_are_idempotent(store: SQLiteQuestStore) -> None:
+def test_timeout_claim_and_history_are_idempotent(store: QuestStore) -> None:
     seed_users(store)
     seed_ready_quest(store)
     store.set_time_limit(1)
@@ -122,7 +149,7 @@ def test_timeout_claim_and_history_are_idempotent(store: SQLiteQuestStore) -> No
     assert history[-1].source_update_id is None
 
 
-def test_captain_state_read_does_not_compete_for_writer_lock(store: SQLiteQuestStore) -> None:
+def test_captain_state_read_does_not_compete_for_writer_lock(store: QuestStore) -> None:
     seed_users(store)
     writer = sqlite3.connect(store.database_path, isolation_level=None)
     writer.execute("PRAGMA journal_mode = WAL")
@@ -135,9 +162,9 @@ def test_captain_state_read_does_not_compete_for_writer_lock(store: SQLiteQuestS
         writer.close()
 
 
-def test_task_limit_is_enforced_atomically(store: SQLiteQuestStore) -> None:
+def test_task_limit_is_enforced_atomically(store: QuestStore) -> None:
     store.set_stage(1, "Лондон")
-    prompt = [ContentPart(ContentType.TEXT, "Prompt")]
+    prompt = [ContentPart(content_type=ContentType.TEXT, data="Prompt")]
     with pytest.raises(ValueError, match="prompt"):
         store.set_task(1, 1, "1", [])
     for task_number in range(1, 10):

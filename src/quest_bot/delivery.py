@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Final, assert_never
 
@@ -16,7 +15,7 @@ from telegram.error import (
     TelegramError,
 )
 
-from quest_bot.models import ContentPart, ContentType
+from quest_bot.models import ContentPart, ContentType, FrozenModel
 
 PLAIN_PARSE_MODE: Final[None] = None
 OUTRO_MAX_ATTEMPTS: Final = 3
@@ -29,8 +28,7 @@ async def _default_sleep(delay_seconds: float) -> None:
     await asyncio.sleep(delay_seconds)
 
 
-@dataclass(frozen=True, slots=True)
-class OutroDeliveryReport:
+class OutroDeliveryReport(FrozenModel):
     """Best-effort outcome for one chat's ordered terminal content."""
 
     sent_parts: int
@@ -132,9 +130,17 @@ class TelegramDelivery:
                 continue
             failed_parts += 1
             if aborted:
-                return OutroDeliveryReport(sent_parts, failed_parts, True)
+                return OutroDeliveryReport(
+                    sent_parts=sent_parts,
+                    failed_parts=failed_parts,
+                    aborted=True,
+                )
 
-        return OutroDeliveryReport(sent_parts, failed_parts, False)
+        return OutroDeliveryReport(
+            sent_parts=sent_parts,
+            failed_parts=failed_parts,
+            aborted=False,
+        )
 
     async def _send_outro_part(
         self,

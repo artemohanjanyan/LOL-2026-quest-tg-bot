@@ -1,9 +1,9 @@
 """Administrator quest-content drafts and inspection commands."""
 
-from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
 
+from pydantic import BaseModel, ConfigDict, Field
 from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -43,13 +43,14 @@ class DraftKind(StrEnum):
     BROADCAST = "broadcast"
 
 
-@dataclass(slots=True)
-class ContentDraft:
+class ContentDraft(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     kind: DraftKind
     stage_number: int | None = None
     task_number: int | None = None
     correct_answer: str | None = None
-    parts: list[ContentPart] = field(default_factory=list)
+    parts: list[ContentPart] = Field(default_factory=list)
 
 
 def _draft_key(update: Update) -> str:
@@ -81,7 +82,7 @@ async def _begin(
     kind: DraftKind,
 ) -> int:
     deps.service.require_admin(actor_id(update))
-    _put_draft(update, context, ContentDraft(kind))
+    _put_draft(update, context, ContentDraft(kind=kind))
     await send_text(update, deps, messages.DRAFT_READY)
     return DRAFT_CONTENT
 
@@ -105,7 +106,7 @@ async def begin_task(
         update,
         context,
         ContentDraft(
-            DraftKind.TASK,
+            kind=DraftKind.TASK,
             stage_number=stage_number,
             task_number=task_number,
         ),

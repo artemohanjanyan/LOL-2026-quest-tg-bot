@@ -59,6 +59,9 @@ TOKEN=1111111111:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 QUEST_DB_PATH=quest.db
 QUEST_ADMIN_ID=123456789
 QUEST_ADMIN_USERNAME=organizer
+QUEST_SWEEP_INTERVAL_SECONDS=15
+QUEST_DATABASE_BUSY_TIMEOUT_MS=5000
+QUEST_DELIVERY_RATE_PER_SECOND=20
 ```
 
 `QUEST_ADMIN_ID` is only a bootstrap: startup ensures that Telegram ID is an
@@ -74,6 +77,23 @@ uv run mypy
 uv run pytest
 ```
 
+Pydantic models define the application data boundary, and `pydantic-settings`
+loads and validates process configuration. SQLAlchemy owns database access;
+Alembic upgrades the database to the packaged head revision whenever the store
+opens. To inspect or generate migrations during development:
+
+```bash
+uv run alembic current
+uv run alembic revision --autogenerate -m "describe the schema change"
+uv run alembic upgrade head
+```
+
+Alembic reads `QUEST_DB_PATH` from the environment or `.env`, just like the
+bot. Review every generated revision. SQLite table rebuilds must explicitly
+disable foreign-key enforcement for the rebuild and preserve the table's
+`STRICT` and `WITHOUT ROWID` options; unsupported direct alterations should
+fail during development instead of silently rebuilding a table.
+
 Install the repository's commit checks once:
 
 ```bash
@@ -84,8 +104,11 @@ The bot stores times and reports durations in UTC. Quest conversations may run i
 where Telegram delivers them; configure group availability through BotFather for the intended
 deployment.
 
-SQLite 3.35 or newer is the durable source of truth. The process enables foreign
+SQLite 3.37 or newer is the durable source of truth. The process enables foreign
 keys, WAL, and a bounded busy timeout, runs packaged versioned migrations at
 startup, and holds an adjacent `.lock` file so two bot processes cannot use the
 same quest database. Back up the database (including WAL state, or use SQLite's
 backup facility) and rehearse backup and restart procedures before the event.
+
+The Alembic history starts with the current clean schema. Databases created by
+pre-Alembic development versions are intentionally unsupported.

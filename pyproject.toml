@@ -5,8 +5,12 @@ description = "Telegram bot for the LOL 2026 online quest"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "python-dotenv>=1,<2",
+    "alembic>=1.16,<2",
+    "filelock>=3.18,<4",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.9,<3",
     "python-telegram-bot[job-queue,rate-limiter]>=22.8,<23",
+    "sqlalchemy>=2.0.41,<3",
 ]
 
 [project.scripts]
@@ -38,7 +42,7 @@ pretty = true
 show_error_codes = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "strict"
+asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ruff]

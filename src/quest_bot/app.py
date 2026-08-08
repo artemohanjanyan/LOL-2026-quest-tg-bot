@@ -92,7 +92,10 @@ def create_application(
     if request is not None:
         builder = builder.request(request)
     application = builder.build()
-    deps = Dependencies(service, TelegramDelivery(application.bot))
+    deps = Dependencies(
+        service=service,
+        delivery=TelegramDelivery(application.bot),
+    )
     application.bot_data[DEPENDENCIES_KEY] = deps
     application.bot_data[SWEEP_INTERVAL_KEY] = settings.sweep_interval_seconds
     register_handlers(application, deps)

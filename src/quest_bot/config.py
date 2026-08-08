@@ -1,46 +1,44 @@
 """Validated process settings loaded once by the composition root."""
 
-import os
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated, Self
 
-from dotenv import load_dotenv
+from pydantic import Field, PositiveInt, StringConstraints, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+NonBlankString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-@dataclass(frozen=True, slots=True)
-class Settings:
-    token: str
-    database_path: Path
-    bootstrap_admin_id: int | None = None
-    bootstrap_admin_username: str = "admin"
-    sweep_interval_seconds: int = 15
-    database_busy_timeout_ms: int = 5_000
-    delivery_rate_per_second: int = 20
+class DatabaseSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+        populate_by_name=True,
+    )
 
-    def __post_init__(self) -> None:
-        if not self.token.strip():
-            raise ValueError("TOKEN must not be empty")
-        if self.sweep_interval_seconds <= 0:
-            raise ValueError("sweep interval must be positive")
-        if self.database_busy_timeout_ms <= 0:
-            raise ValueError("database busy timeout must be positive")
-        if self.delivery_rate_per_second <= 0:
-            raise ValueError("delivery rate must be positive")
-        if self.bootstrap_admin_id is not None and self.bootstrap_admin_id <= 0:
-            raise ValueError("bootstrap admin ID must be positive")
-        if self.bootstrap_admin_id is not None and not self.bootstrap_admin_username.strip():
-            raise ValueError("bootstrap admin username must not be empty")
+    database_path: Path = Field(default=Path("quest.db"), validation_alias="QUEST_DB_PATH")
 
-    @classmethod
-    def from_env(cls) -> Settings:
-        load_dotenv()
-        token = os.getenv("TOKEN", "")
-        database_path = Path(os.getenv("QUEST_DB_PATH", "quest.db"))
-        raw_admin_id = os.getenv("QUEST_ADMIN_ID")
-        admin_id = int(raw_admin_id) if raw_admin_id else None
-        return cls(
-            token=token,
-            database_path=database_path,
-            bootstrap_admin_id=admin_id,
-            bootstrap_admin_username=os.getenv("QUEST_ADMIN_USERNAME", "admin"),
-        )
+
+class Settings(DatabaseSettings):
+    model_config = SettingsConfigDict(env_prefix="QUEST_")
+
+    token: NonBlankString = Field(default="", validation_alias="TOKEN")
+    bootstrap_admin_id: PositiveInt | None = Field(
+        default=None,
+        validation_alias="QUEST_ADMIN_ID",
+    )
+    bootstrap_admin_username: NonBlankString = Field(
+        default="admin",
+        validation_alias="QUEST_ADMIN_USERNAME",
+    )
+    sweep_interval_seconds: PositiveInt = 15
+    database_busy_timeout_ms: PositiveInt = 5_000
+    delivery_rate_per_second: PositiveInt = 20
+
+    @model_validator(mode="after")
+    def validate_bootstrap_admin(self) -> Self:
+        if self.bootstrap_admin_id is not None and not self.bootstrap_admin_username.lstrip("@"):
+            raise ValueError("bootstrap admin username must contain characters other than '@'")
+        return self
