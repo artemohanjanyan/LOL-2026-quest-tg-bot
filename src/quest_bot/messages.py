@@ -26,12 +26,9 @@ NOTHING_TO_CANCEL = "Немає операції, яку можна скасув
 CAPTAIN_HELP = """Команди капітана:
 /start — розпочати відлік і отримати вступ
 /next_stage — перейти до наступного етапу
-/confirm_next_stage — підтвердити перехід
-  із нерозв’язаними завданнями
 /answer <номер> <відповідь> — подати відповідь
 /stage — знову показати поточний етап
 /status — перевірити час і прогрес
-/cancel — скасувати очікуване підтвердження
 /help — показати цей маршрут"""
 
 ADMIN_HELP = f"""{CAPTAIN_HELP}
@@ -41,6 +38,7 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 Учасники, результати й зв’язок:
 /add_captain <telegram_id> [username] — додати або активувати капітана
 /remove_captain <telegram_id> — деактивувати капітана
+/reset_captain <username|telegram_id> — підготувати скидання прогресу
 /list_users — показати учасників
 /leaderboard — показати таблицю результатів
 /progress <username|telegram_id> — показати прогрес капітана
@@ -70,8 +68,7 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 
 Робота з чернеткою:
 /correct_answer <відповідь> — задати правильну відповідь
-/done — опублікувати чернетку
-/cancel — скасувати поточну операцію"""
+/done — опублікувати чернетку"""
 
 OWNER_ADMIN_HELP = f"""{ADMIN_HELP}
 
@@ -84,6 +81,7 @@ USAGE_ADD_CAPTAIN = (
     "Формат: /add_captain <telegram_id> [username]. Username обов’язковий для нового капітана."
 )
 USAGE_REMOVE_CAPTAIN = "Формат: /remove_captain <telegram_id>"
+USAGE_RESET_CAPTAIN = "Формат: /reset_captain <username або telegram_id>"
 USAGE_PROGRESS = "Формат: /progress <username або telegram_id>"
 USAGE_SET_STAGE = "Формат: /set_stage <номер етапу> <назва>"
 USAGE_SET_TASK = "Формат: /set_task <номер етапу> <номер завдання>"
@@ -261,7 +259,10 @@ QUEST_FINISHED = "Маршрут пройдено! Ви дісталися фі�
 
 # Admin workflow ---------------------------------------------------------------
 
-DRAFT_READY = "Чернетку відкрито. Надсилайте частини в потрібному порядку, потім /done."
+DRAFT_READY = (
+    "Чернетку відкрито. Надсилайте частини в потрібному порядку, потім /done. "
+    "Щоб скасувати операцію, надішліть /cancel."
+)
 DRAFT_CANCELLED = "Чернетку скасовано; опублікований маршрут не змінився."
 DRAFT_PUBLISHED = "Чернетку опубліковано. Мапу експедиції оновлено."
 NO_ACTIVE_DRAFT = "Немає відкритої чернетки."
@@ -270,6 +271,11 @@ CONTENT_PART_ADDED = "Частину додано до чернетки."
 CONTENT_DELETED = "Вміст видалено з поточної мапи."
 STAGE_NOT_FOUND = "Етап із таким номером не знайдено."
 CAPTAIN_NOT_FOUND = "Капітана не знайдено. Перевірте username або Telegram ID."
+NO_RESET_CONFIRMATION = "Немає скидання прогресу, яке очікує підтвердження."
+RESET_CANCELLED = "Скидання прогресу скасовано; дані капітана не змінено."
+RESET_TARGET_CHANGED = (
+    "Позиція капітана змінилася. Скидання не виконано; почніть знову з /reset_captain."
+)
 
 
 def captain_added(username: str, telegram_id: int) -> str:
@@ -282,6 +288,22 @@ def admin_added(username: str, telegram_id: int) -> str:
 
 def captain_removed(username: str, telegram_id: int) -> str:
     return f"Капітана {username} ({telegram_id}) деактивовано; історію подорожі збережено."
+
+
+def captain_reset_warning(username: str, telegram_id: int) -> str:
+    return (
+        f"Увага: ви збираєтеся скинути прогрес капітана @{username} ({telegram_id}). "
+        "Позиція, час старту та всі спроби будуть скинуті; історія переходів залишиться. "
+        "Самі відповіді відновити з історії переходів неможливо. "
+        "Для підтвердження надішліть /confirm_reset_captain, для скасування — /cancel."
+    )
+
+
+def captain_reset(username: str, telegram_id: int) -> str:
+    return (
+        f"Прогрес капітана @{username} ({telegram_id}) скинуто. "
+        "Капітан може розпочати подорож заново командою /start."
+    )
 
 
 def stage_saved(stage_number: int, stage_name: str) -> str:

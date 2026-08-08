@@ -10,6 +10,7 @@ from telegram.ext import Application
 from quest_bot import messages
 from quest_bot.app import create_application
 from quest_bot.config import Settings
+from quest_bot.models import CaptainPosition
 from quest_bot.service import QuestService
 from quest_bot.storage.sqlite import SQLiteQuestStore
 from tests.fakes import FakeTelegramRequest, TelegramUser
@@ -303,7 +304,11 @@ async def test_only_owner_admin_can_add_admin_or_see_command(
 ) -> None:
     owner = bot_harness.user(ADMIN_ID, "organizer")
     await owner.send("/help")
-    assert "/add_admin" in bot_harness.telegram.messages_to(ADMIN_ID)[-1]
+    owner_help = bot_harness.telegram.messages_to(ADMIN_ID)[-1]
+    assert "/add_admin" in owner_help
+    assert "/confirm_next_stage" not in owner_help
+    assert "/confirm_reset_captain" not in owner_help
+    assert "/cancel" not in owner_help
 
     await owner.send(f"/add_admin {OTHER_CAPTAIN_ID} stationmaster")
     added = bot_harness.store.get_user(OTHER_CAPTAIN_ID)
@@ -319,6 +324,79 @@ async def test_only_owner_admin_can_add_admin_or_see_command(
     assert "/add_admin" not in regular_messages[0]
     assert regular_messages[1] == messages.PERMISSION_DENIED
     assert bot_harness.store.get_user(404) is None
+
+
+@pytest.mark.asyncio
+async def test_reset_captain_requires_confirmation_and_can_be_cancelled(
+    bot_harness: BotHarness,
+) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/answer 1 80")
+    transitions_before = bot_harness.store.list_captain_transitions(CAPTAIN_ID)
+    bot_harness.telegram.clear()
+
+    await admin.send("/reset_captain passepartout")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        messages.captain_reset_warning("passepartout", CAPTAIN_ID)
+    ]
+    assert bot_harness.store.get_captain_state(CAPTAIN_ID).position is CaptainPosition.STAGE
+    assert bot_harness.store.get_attempt_counts(CAPTAIN_ID, 1) == ((1, 1),)
+
+    bot_harness.telegram.clear()
+    await admin.send("/cancel")
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [messages.RESET_CANCELLED]
+    assert bot_harness.store.get_captain_state(CAPTAIN_ID).position is CaptainPosition.STAGE
+
+    bot_harness.telegram.clear()
+    await admin.send("/confirm_reset_captain")
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [messages.NO_RESET_CONFIRMATION]
+
+    bot_harness.telegram.clear()
+    await admin.send(f"/reset_captain {CAPTAIN_ID}")
+    await admin.send("/confirm_reset_captain")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID)[-1] == messages.captain_reset(
+        "passepartout", CAPTAIN_ID
+    )
+    state = bot_harness.store.get_captain_state(CAPTAIN_ID)
+    assert state.position is CaptainPosition.NOT_STARTED
+    assert state.started_at_ms is None
+    assert state.current_stage_number is None
+    assert bot_harness.store.get_attempt_counts(CAPTAIN_ID, 1) == ()
+    assert not any(item.solved for item in bot_harness.store.list_task_progress(CAPTAIN_ID))
+
+    transitions = bot_harness.store.list_captain_transitions(CAPTAIN_ID)
+    assert len(transitions) == len(transitions_before) + 1
+    reset_transition = transitions[-1]
+    assert reset_transition.from_position is CaptainPosition.STAGE
+    assert reset_transition.to_position is CaptainPosition.NOT_STARTED
+    assert reset_transition.source_update_id is not None
+
+
+@pytest.mark.asyncio
+async def test_reset_confirmation_expires_when_captain_changes_stage(
+    bot_harness: BotHarness,
+) -> None:
+    seed_second_stage(bot_harness.store)
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await admin.send(f"/reset_captain {CAPTAIN_ID}")
+    await captain.send("/next_stage")
+    await captain.send("/confirm_next_stage")
+    bot_harness.telegram.clear()
+
+    await admin.send("/confirm_reset_captain")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [messages.RESET_TARGET_CHANGED]
+    state = bot_harness.store.get_captain_state(CAPTAIN_ID)
+    assert state.position is CaptainPosition.STAGE
+    assert state.current_stage_number == 4
 
 
 @pytest.mark.asyncio
@@ -397,6 +475,8 @@ async def test_admin_can_publish_multipart_intro_through_conversation(
     admin = bot_harness.user(ADMIN_ID, "organizer")
 
     await admin.send("/set_intro")
+    assert bot_harness.telegram.messages_to(ADMIN_ID)[-1] == messages.DRAFT_READY
+    assert "/cancel" in messages.DRAFT_READY
     await admin.send("A replacement introduction")
     await admin.send_message(document="intro-pdf-id", caption="Route papers")
     await admin.send("/done")

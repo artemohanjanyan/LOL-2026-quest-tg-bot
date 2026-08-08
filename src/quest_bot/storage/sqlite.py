@@ -660,6 +660,40 @@ class SQLiteQuestStore:
                 skipped_unsolved_tasks=skipped_unsolved_tasks,
             )
 
+    def reset_captain(
+        self,
+        expected_state: CaptainState,
+        *,
+        event_at_ms: int,
+        recorded_at_ms: int,
+        source_update_id: int,
+    ) -> CaptainState:
+        with self._transaction() as connection:
+            duplicate = self._transition_for_update(connection, source_update_id)
+            if duplicate is not None:
+                if duplicate.user_id != expected_state.user_id:
+                    raise DuplicateUpdateError(
+                        f"update {source_update_id} belongs to another captain"
+                    )
+                return self._state_in_transaction(connection, expected_state.user_id)
+            state = self._state_in_transaction(connection, expected_state.user_id)
+            if state != expected_state:
+                raise StateConflictError("captain position changed")
+            connection.execute(
+                "DELETE FROM task_attempts WHERE user_id = ?",
+                (state.user_id,),
+            )
+            return self._transition_in_transaction(
+                connection,
+                state,
+                target_position=CaptainPosition.NOT_STARTED,
+                target_stage_number=None,
+                event_at_ms=event_at_ms,
+                recorded_at_ms=recorded_at_ms,
+                source_update_id=source_update_id,
+                skipped_unsolved_tasks=False,
+            )
+
     def claim_overdue_captains(self, now_ms: int) -> tuple[CaptainState, ...]:
         with self._transaction() as connection:
             settings_row = self._require_row(
@@ -712,7 +746,9 @@ class SQLiteQuestStore:
         skipped_unsolved_tasks: bool,
     ) -> CaptainState:
         started_at_ms = state.started_at_ms
-        if state.position is CaptainPosition.NOT_STARTED:
+        if target_position is CaptainPosition.NOT_STARTED:
+            started_at_ms = None
+        elif state.position is CaptainPosition.NOT_STARTED:
             if target_position is not CaptainPosition.INTRO:
                 raise StateConflictError("the first position must be intro")
             started_at_ms = recorded_at_ms

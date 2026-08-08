@@ -11,6 +11,7 @@ from quest_bot.handlers.common import (
     HandlerType,
     actor_id,
     chat_id,
+    clear_pending_captain_reset,
     event_at_ms,
     parse_numbered_text,
     render_status,
@@ -246,11 +247,12 @@ async def cancel(
     deps: Dependencies,
 ) -> None:
     deps.service.require_user(actor_id(update))
-    text = (
-        messages.SKIP_CANCELLED
-        if _clear_pending_skip(update, context)
-        else messages.NOTHING_TO_CANCEL
-    )
+    if clear_pending_captain_reset(update, context) is not None:
+        text = messages.RESET_CANCELLED
+    elif _clear_pending_skip(update, context):
+        text = messages.SKIP_CANCELLED
+    else:
+        text = messages.NOTHING_TO_CANCEL
     await send_text(update, deps, text)
 
 

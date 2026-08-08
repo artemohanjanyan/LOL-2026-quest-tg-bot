@@ -33,6 +33,11 @@ commands and may enroll or deactivate captains without deleting their history.
 Only the owner administrator configured through `QUEST_ADMIN_ID` may add other
 administrators. Run `/help` for the role-specific command list.
 
+For testing, `/reset_captain` prepares a progress reset that must be completed
+with `/confirm_reset_captain` or abandoned with `/cancel`. A confirmed reset
+deletes the captain's task attempts and returns them to `not_started`, while
+retaining their transition history and recording the reset as a new transition.
+
 Multipart `/set_intro`, `/set_success_outro`, `/set_timeout_outro`, `/set_task`,
 and `/broadcast` workflows accept text, photo, sticker, voice, document, video,
 and video-note messages. Send parts in order and publish with `/done`; `/cancel`

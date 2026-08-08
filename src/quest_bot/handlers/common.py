@@ -20,10 +20,11 @@ from quest_bot.errors import (
     UnknownUser,
     UsageError,
 )
-from quest_bot.models import CaptainPosition, ContentPart, ContentType
+from quest_bot.models import CaptainPosition, CaptainState, ContentPart, ContentType
 from quest_bot.service import QuestService, StagePresentation, StatusSnapshot
 
 LOGGER = logging.getLogger(__name__)
+_PENDING_CAPTAIN_RESET_KEY_PREFIX = "admin:pending-captain-reset:"
 type ApplicationType = Application[
     ExtBot[int],
     ContextTypes.DEFAULT_TYPE,
@@ -105,6 +106,30 @@ def user_data(context: ContextTypes.DEFAULT_TYPE) -> dict[Any, Any]:
     if data is None:
         raise RuntimeError("per-user handler data is unavailable")
     return data
+
+
+def remember_pending_captain_reset(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    state: CaptainState,
+) -> None:
+    user_data(context)[f"{_PENDING_CAPTAIN_RESET_KEY_PREFIX}{chat_id(update)}"] = state
+
+
+def pending_captain_reset(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> CaptainState | None:
+    value = user_data(context).get(f"{_PENDING_CAPTAIN_RESET_KEY_PREFIX}{chat_id(update)}")
+    return value if isinstance(value, CaptainState) else None
+
+
+def clear_pending_captain_reset(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> CaptainState | None:
+    value = user_data(context).pop(f"{_PENDING_CAPTAIN_RESET_KEY_PREFIX}{chat_id(update)}", None)
+    return value if isinstance(value, CaptainState) else None
 
 
 async def send_text(update: Update, deps: Dependencies, text: str) -> None:

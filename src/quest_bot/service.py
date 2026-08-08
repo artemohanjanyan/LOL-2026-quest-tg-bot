@@ -369,6 +369,36 @@ class QuestService:
             return False
         return self.store.deactivate_captain(user_id, self._clock())
 
+    def captain_reset_target(self, actor_id: int, reference: str) -> tuple[User, CaptainState]:
+        self.require_admin(actor_id)
+        target = self.resolve_user(reference)
+        if target.role is not UserRole.CAPTAIN:
+            raise NotFound("captain")
+        return target, self.store.get_captain_state(target.user_id)
+
+    def reset_captain(
+        self,
+        actor_id: int,
+        expected_state: CaptainState,
+        *,
+        event_at_ms: int,
+        source_update_id: int,
+    ) -> User:
+        self.require_admin(actor_id)
+        target = self.store.get_user(expected_state.user_id)
+        if target is None or target.role is not UserRole.CAPTAIN:
+            raise NotFound("captain")
+        try:
+            self.store.reset_captain(
+                expected_state,
+                event_at_ms=event_at_ms,
+                recorded_at_ms=self._clock(),
+                source_update_id=source_update_id,
+            )
+        except StateConflictError as error:
+            raise InvalidQuestState("captain progress changed") from error
+        return target
+
     def list_users(self, actor_id: int) -> tuple[User, ...]:
         self.require_admin(actor_id)
         return self.store.list_users(include_inactive=True)
