@@ -1,7 +1,9 @@
+import logging
 from dataclasses import dataclass, field
 
 import pytest
 from telegram import Bot
+from telegram.error import BadRequest
 from telegram.warnings import PTBDeprecationWarning
 
 from quest_bot.delivery import TelegramDelivery
@@ -15,6 +17,29 @@ class RecordingSleep:
 
     async def __call__(self, delay: float) -> None:
         self.delays.append(delay)
+
+
+@pytest.mark.asyncio
+async def test_delivery_error_logs_redact_bot_token(
+    telegram_request: FakeTelegramRequest,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    token = "999001:test-token"
+    bot = Bot(token, request=telegram_request)
+    telegram_request.fail_next(
+        "sendMessage",
+        error_code=400,
+        description=f"Synthetic failure containing {token}",
+    )
+    caplog.set_level(logging.INFO, logger="quest_bot.delivery")
+
+    async with bot:
+        with pytest.raises(BadRequest):
+            await TelegramDelivery(bot).send_part(202, ContentPart(ContentType.TEXT, "Hello"))
+
+    rendered = "\n".join(record.getMessage() for record in caplog.records)
+    assert token not in rendered
+    assert "<redacted>" in rendered
 
 
 @pytest.mark.asyncio

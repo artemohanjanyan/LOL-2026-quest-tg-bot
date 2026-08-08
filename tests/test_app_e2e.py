@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,6 +117,27 @@ async def test_unknown_commands_and_messages_receive_guidance(
         messages.UNKNOWN_COMMAND,
         messages.UNKNOWN_MESSAGE,
     ]
+
+
+@pytest.mark.asyncio
+async def test_incoming_updates_and_outgoing_responses_are_logged(
+    bot_harness: BotHarness,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="quest_bot.handlers.registry")
+    caplog.set_level(logging.INFO, logger="quest_bot.delivery")
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+
+    await captain.send("/status")
+
+    rendered = "\n".join(record.getMessage() for record in caplog.records)
+    assert "Telegram update received:" in rendered
+    assert '"text": "/status"' in rendered
+    assert "Telegram request:" in rendered
+    assert messages.status_not_started(limit_minutes=80) in rendered
+    assert "Telegram response:" in rendered
+    assert "status=ok" in rendered
+    assert rendered.count("request_id=1") == 2
 
 
 @pytest.mark.asyncio

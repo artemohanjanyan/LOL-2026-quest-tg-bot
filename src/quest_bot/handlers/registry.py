@@ -1,9 +1,10 @@
 """Explicit handler ordering and Telegram command metadata."""
 
+import logging
 from functools import partial
 
 from telegram import BotCommand, Update
-from telegram.ext import MessageHandler, filters
+from telegram.ext import ContextTypes, MessageHandler, TypeHandler, filters
 
 from quest_bot import messages
 from quest_bot.handlers import captain
@@ -16,6 +17,8 @@ from quest_bot.handlers.common import (
     send_text,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 COMMANDS: tuple[BotCommand, ...] = (
     BotCommand("start", "розпочати відлік і отримати вступ"),
     BotCommand("next_stage", "перейти до наступного етапу"),
@@ -24,6 +27,10 @@ COMMANDS: tuple[BotCommand, ...] = (
     BotCommand("status", "перевірити час і прогрес"),
     BotCommand("help", "показати доступні команди"),
 )
+
+
+async def log_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    LOGGER.info("Telegram update received: %s", update.to_json())
 
 
 async def unknown_command(update: Update, context: object, *, deps: Dependencies) -> None:
@@ -38,6 +45,7 @@ def register_handlers(
     application: ApplicationType,
     deps: Dependencies,
 ) -> None:
+    application.add_handler(TypeHandler(Update, log_update), group=-1)
     # The content conversation comes first so /done and /cancel are routed back
     # to the active per-user, per-chat draft before ordinary command handlers.
     modules = (content, users, operations, reports, captain)

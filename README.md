@@ -26,6 +26,11 @@ after the commit. Each outro part gets up to three in-memory attempts, respectin
 Telegram `retry_after` and using short backoff for network errors. Retry state is
 not persisted and interrupted deliveries are not resumed after restart.
 
+Every incoming Telegram update and outgoing message request/response is logged
+at `INFO` level. This deliberately includes message text, answers, captions, and
+Telegram file IDs, so production logs should be treated as sensitive. Raw Bot
+API URLs are not logged, which keeps the bot token out of these records.
+
 ## Content and roles
 
 Users are authorized by stable Telegram user ID. Administrators can use captain

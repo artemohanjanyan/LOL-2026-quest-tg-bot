@@ -5,6 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
+from itertools import count
 from typing import Final, assert_never
 
 from telegram import Bot, Message
@@ -49,6 +50,7 @@ class TelegramDelivery:
     ) -> None:
         self._bot = bot
         self._sleep = sleep
+        self._request_ids = count(1)
 
     async def send_parts(
         self,
@@ -62,6 +64,41 @@ class TelegramDelivery:
 
     async def send_part(self, chat_id: int, part: ContentPart) -> Message:
         """Send one part using its matching Telegram Bot API method."""
+
+        request_id = next(self._request_ids)
+        LOGGER.info(
+            "Telegram request: request_id=%s chat_id=%s content_type=%s data=%r caption=%r",
+            request_id,
+            chat_id,
+            part.content_type.value,
+            part.data,
+            part.caption,
+        )
+        try:
+            response = await self._send_part(chat_id, part)
+        except Exception as error:
+            safe_error = str(error).replace(self._bot.token, "<redacted>")
+            LOGGER.warning(
+                "Telegram response: request_id=%s chat_id=%s content_type=%s "
+                "status=error error_type=%s error=%s",
+                request_id,
+                chat_id,
+                part.content_type.value,
+                type(error).__name__,
+                safe_error,
+            )
+            raise
+        LOGGER.info(
+            "Telegram response: request_id=%s chat_id=%s content_type=%s status=ok payload=%s",
+            request_id,
+            chat_id,
+            part.content_type.value,
+            response.to_json(),
+        )
+        return response
+
+    async def _send_part(self, chat_id: int, part: ContentPart) -> Message:
+        """Call the matching Telegram Bot API method."""
 
         match part.content_type:
             case ContentType.TEXT:
