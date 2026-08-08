@@ -274,6 +274,28 @@ async def test_captain_cannot_use_admin_content_command(
 
 
 @pytest.mark.asyncio
+async def test_add_captain_reuses_existing_username_when_omitted(
+    bot_harness: BotHarness,
+) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    await admin.send(f"/remove_captain {CAPTAIN_ID}")
+    bot_harness.telegram.clear()
+
+    await admin.send(f"/add_captain {CAPTAIN_ID}")
+    await admin.send(f"/add_captain {OTHER_CAPTAIN_ID}")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        messages.captain_added("passepartout", CAPTAIN_ID),
+        messages.USAGE_ADD_CAPTAIN,
+    ]
+    captain = bot_harness.store.get_user(CAPTAIN_ID)
+    assert captain is not None
+    assert captain.username == "passepartout"
+    assert captain.active
+    assert bot_harness.store.get_user(OTHER_CAPTAIN_ID) is None
+
+
+@pytest.mark.asyncio
 async def test_empty_stage_list_uses_admin_facing_copy(bot_harness: BotHarness) -> None:
     admin = bot_harness.user(ADMIN_ID, "organizer")
     await admin.send("/delete_stage 1")

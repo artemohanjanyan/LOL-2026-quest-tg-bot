@@ -37,7 +37,7 @@ CAPTAIN_HELP = """Команди капітана:
 ADMIN_HELP = f"""{CAPTAIN_HELP}
 
 Команди організатора:
-/add_captain <telegram_id> <username> — додати капітана
+/add_captain <telegram_id> [username] — додати або активувати капітана
 /remove_captain <telegram_id> — деактивувати капітана
 /list_users — показати учасників
 /broadcast — підготувати оголошення
@@ -63,7 +63,9 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 /cancel — скасувати поточну операцію"""
 
 USAGE_ANSWER = "Формат: /answer <номер завдання> <відповідь>"
-USAGE_ADD_CAPTAIN = "Формат: /add_captain <telegram_id> <username>"
+USAGE_ADD_CAPTAIN = (
+    "Формат: /add_captain <telegram_id> [username]. Username обов’язковий для нового капітана."
+)
 USAGE_REMOVE_CAPTAIN = "Формат: /remove_captain <telegram_id>"
 USAGE_PROGRESS = "Формат: /progress <username або telegram_id>"
 USAGE_SET_STAGE = "Формат: /set_stage <номер етапу> <назва>"

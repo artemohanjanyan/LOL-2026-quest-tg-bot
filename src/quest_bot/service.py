@@ -310,8 +310,13 @@ class QuestService:
 
     # Administration --------------------------------------------------------
 
-    def add_captain(self, actor_id: int, user_id: int, username: str) -> User:
+    def add_captain(self, actor_id: int, user_id: int, username: str | None = None) -> User:
         self.require_admin(actor_id)
+        if username is None:
+            existing = self.store.get_user(user_id)
+            if existing is None:
+                raise ContentValidationError("username required for new captain")
+            username = existing.username
         self._validate_identity(user_id, username)
         return self.store.add_captain(user_id, username.lstrip("@"), self._clock())
 

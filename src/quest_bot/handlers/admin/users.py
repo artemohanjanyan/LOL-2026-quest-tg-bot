@@ -24,7 +24,7 @@ async def add_captain(
     deps: Dependencies,
 ) -> None:
     args = command_args(context)
-    if len(args) != 2:
+    if len(args) not in {1, 2}:
         await send_text(update, deps, messages.USAGE_ADD_CAPTAIN)
         return
     try:
@@ -33,7 +33,8 @@ async def add_captain(
         await send_text(update, deps, messages.USAGE_ADD_CAPTAIN)
         return
     try:
-        user = deps.service.add_captain(actor_id(update), telegram_id, args[1])
+        username = args[1] if len(args) == 2 else None
+        user = deps.service.add_captain(actor_id(update), telegram_id, username)
     except ContentValidationError:
         await send_text(update, deps, messages.USAGE_ADD_CAPTAIN)
         return
