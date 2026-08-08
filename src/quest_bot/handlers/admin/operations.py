@@ -53,8 +53,34 @@ async def set_time_limit(
     await send_text(update, deps, messages.time_limit_updated(saved))
 
 
+async def show_settings(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    deps: Dependencies,
+) -> None:
+    snapshot = deps.service.show_settings(actor_id(update))
+    await send_text(
+        update,
+        deps,
+        messages.quest_settings_summary(
+            time_limit_minutes=snapshot.time_limit_minutes,
+            score_steps=snapshot.score_steps,
+            intro_part_count=snapshot.intro_part_count,
+            success_outro_part_count=snapshot.success_outro_part_count,
+            timeout_outro_part_count=snapshot.timeout_outro_part_count,
+            stages=(
+                (stage.stage.stage_number, stage.stage.name, stage.task_count)
+                for stage in snapshot.stages
+            ),
+            ready=snapshot.ready,
+        ),
+    )
+
+
 def build_handlers(deps: Dependencies) -> list[HandlerType]:
     return [
+        CommandHandler("show_settings", partial(show_settings, deps=deps)),
         CommandHandler("set_scores", partial(set_scores, deps=deps)),
         CommandHandler("set_time_limit", partial(set_time_limit, deps=deps)),
     ]

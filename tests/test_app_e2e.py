@@ -307,6 +307,43 @@ async def test_empty_stage_list_uses_admin_facing_copy(bot_harness: BotHarness) 
 
 
 @pytest.mark.asyncio
+async def test_show_settings_reports_values_content_stages_and_readiness(
+    bot_harness: BotHarness,
+) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    seed_second_stage(bot_harness.store)
+    await admin.send("/set_time_limit 75")
+    await admin.send("/set_scores 12 7 0")
+    bot_harness.telegram.clear()
+
+    await admin.send("/show_settings")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        "\n".join(
+            [
+                "Путівник експедиції:",
+                "Ліміт часу: 75 хв.",
+                "Шкала балів за спробами: 12, 7, 0.",
+                "Вступ: налаштовано (частин: 1).",
+                "Успішний фінал: налаштовано (частин: 1).",
+                "Фінал за часом: налаштовано (частин: 1).",
+                "Етапи:",
+                "1. Лондон — завдань: 2",
+                "4. Суець — завдань: 1",
+                "Готовність: маршрут готовий до старту.",
+            ]
+        )
+    ]
+
+    await admin.send("/delete_task 4 2")
+    bot_harness.telegram.clear()
+    await admin.send("/show_settings")
+    summary = bot_harness.telegram.messages_to(ADMIN_ID)[0]
+    assert "4. Суець — завдань: 0" in summary
+    assert "Готовність: маршрут ще не готовий до старту." in summary
+
+
+@pytest.mark.asyncio
 async def test_missing_stage_uses_admin_facing_copy(bot_harness: BotHarness) -> None:
     admin = bot_harness.user(ADMIN_ID, "organizer")
 

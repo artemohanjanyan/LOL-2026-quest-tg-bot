@@ -84,6 +84,32 @@ class TimeoutSweepResult:
     outro_parts: tuple[ContentPart, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ConfiguredStageSummary:
+    stage: Stage
+    task_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class QuestSettingsSnapshot:
+    time_limit_minutes: int
+    score_steps: tuple[int, ...]
+    intro_part_count: int
+    success_outro_part_count: int
+    timeout_outro_part_count: int
+    stages: tuple[ConfiguredStageSummary, ...]
+
+    @property
+    def ready(self) -> bool:
+        return (
+            self.intro_part_count > 0
+            and self.success_outro_part_count > 0
+            and self.timeout_outro_part_count > 0
+            and bool(self.stages)
+            and all(stage.task_count > 0 for stage in self.stages)
+        )
+
+
 class QuestService:
     """Concrete application service containing all mutable quest policy."""
 
@@ -425,6 +451,10 @@ class QuestService:
             raise ContentValidationError("invalid time limit")
         return self.store.set_time_limit(minutes)
 
+    def show_settings(self, actor_id: int) -> QuestSettingsSnapshot:
+        self.require_admin(actor_id)
+        return self._settings_snapshot()
+
     def leaderboard(self, actor_id: int) -> tuple[CaptainSummary, ...]:
         self.require_admin(actor_id)
         summaries = self.store.list_captain_summaries()
@@ -485,16 +515,25 @@ class QuestService:
     # Internal helpers ------------------------------------------------------
 
     def _assert_quest_ready(self) -> None:
-        stages = self.store.list_stages()
-        ready = (
-            bool(self.store.get_intro_parts())
-            and bool(self.store.get_outro_parts(OutroKind.SUCCESS))
-            and bool(self.store.get_outro_parts(OutroKind.TIMEOUT))
-            and bool(stages)
-            and all(bool(self.store.list_stage_tasks(stage.stage_number)) for stage in stages)
-        )
-        if not ready:
+        if not self._settings_snapshot().ready:
             raise QuestNotReady
+
+    def _settings_snapshot(self) -> QuestSettingsSnapshot:
+        stages = self.store.list_stages()
+        return QuestSettingsSnapshot(
+            time_limit_minutes=self.store.get_time_limit(),
+            score_steps=self.store.get_score_steps(),
+            intro_part_count=len(self.store.get_intro_parts()),
+            success_outro_part_count=len(self.store.get_outro_parts(OutroKind.SUCCESS)),
+            timeout_outro_part_count=len(self.store.get_outro_parts(OutroKind.TIMEOUT)),
+            stages=tuple(
+                ConfiguredStageSummary(
+                    stage,
+                    len(self.store.list_stage_tasks(stage.stage_number)),
+                )
+                for stage in stages
+            ),
+        )
 
     def _presentation(self, stage_number: int) -> StagePresentation:
         stage = self.store.get_stage(stage_number)

@@ -57,6 +57,7 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 /list_stages — показати етапи
 /show_stage <номер> — показати етап
 /show_task <етап> <завдання> — показати завдання
+/show_settings — показати налаштування й готовність маршруту
 /set_scores <бали...> — налаштувати шкалу балів
 /set_time_limit <хвилини> — налаштувати тривалість подорожі
 /done — опублікувати чернетку
@@ -272,6 +273,40 @@ def scores_updated(points: Iterable[int]) -> str:
 
 def time_limit_updated(minutes: int) -> str:
     return f"Орієнтир подорожі оновлено: {minutes} хв. Зміна вже діє для активних капітанів."
+
+
+def quest_settings_summary(
+    *,
+    time_limit_minutes: int,
+    score_steps: Iterable[int],
+    intro_part_count: int,
+    success_outro_part_count: int,
+    timeout_outro_part_count: int,
+    stages: Iterable[tuple[int, str, int]],
+    ready: bool,
+) -> str:
+    def content_state(part_count: int) -> str:
+        return f"налаштовано (частин: {part_count})" if part_count else "не налаштовано"
+
+    lines = [
+        "Путівник експедиції:",
+        f"Ліміт часу: {time_limit_minutes} хв.",
+        f"Шкала балів за спробами: {', '.join(str(point) for point in score_steps)}.",
+        f"Вступ: {content_state(intro_part_count)}.",
+        f"Успішний фінал: {content_state(success_outro_part_count)}.",
+        f"Фінал за часом: {content_state(timeout_outro_part_count)}.",
+    ]
+    stage_rows = tuple(stages)
+    if stage_rows:
+        lines.append("Етапи:")
+        lines.extend(
+            f"{number}. {name} — завдань: {task_count}" for number, name, task_count in stage_rows
+        )
+    else:
+        lines.append("Етапи: не налаштовано.")
+    readiness = "маршрут готовий до старту" if ready else "маршрут ще не готовий до старту"
+    lines.append(f"Готовність: {readiness}.")
+    return "\n".join(lines)
 
 
 def broadcast_complete(*, delivered: int, failed: int) -> str:
