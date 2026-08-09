@@ -9,11 +9,7 @@ import pytest_asyncio
 from telegram.ext import Application, CallbackContext
 
 from quest_bot import messages
-from quest_bot.app import (
-    SWEEP_HEARTBEAT_EVERY_KEY,
-    _timeout_sweep,
-    create_application,
-)
+from quest_bot.app import SWEEP_HEARTBEAT_EVERY_KEY, create_application
 from quest_bot.config import Settings
 from quest_bot.models import CaptainPosition
 from quest_bot.service import QuestService
@@ -560,8 +556,9 @@ async def test_application_post_init_registers_independent_timeout_sweep(
 
     await post_init(bot_harness.application)
 
-    assert bot_harness.application.job_queue is not None
-    jobs = bot_harness.application.job_queue.jobs()
+    job_queue = bot_harness.application.job_queue
+    assert job_queue is not None
+    jobs = job_queue.jobs()
     assert [job.name for job in jobs] == ["quest-timeout-sweep"]
     control_methods = [method for method, _ in bot_harness.telegram.calls]
     assert "setMyCommands" in control_methods
@@ -575,18 +572,19 @@ async def test_timeout_sweep_logs_periodic_application_heartbeat(
     post_init = bot_harness.application.post_init
     assert post_init is not None
     await post_init(bot_harness.application)
-    heartbeat_every = int(
-        bot_harness.application.bot_data[SWEEP_HEARTBEAT_EVERY_KEY]
-    )
+    job_queue = bot_harness.application.job_queue
+    assert job_queue is not None
+    (job,) = job_queue.jobs()
+    heartbeat_every = int(bot_harness.application.bot_data[SWEEP_HEARTBEAT_EVERY_KEY])
     context = CallbackContext(bot_harness.application)
     caplog.set_level(logging.INFO, logger="quest_bot.app")
     caplog.clear()
 
     for _ in range(heartbeat_every - 1):
-        await _timeout_sweep(context)
+        await job.callback(context)
     assert "Quest timeout sweep healthy" not in caplog.text
 
-    await _timeout_sweep(context)
+    await job.callback(context)
 
     assert f"Quest timeout sweep healthy: runs={heartbeat_every}" in caplog.text
 

@@ -71,19 +71,20 @@ class SQLiteQuestStore:
         if sqlite3.sqlite_version_info < _MIN_SQLITE_VERSION:
             raise RuntimeError("SQLite 3.35 or newer is required")
 
-        path = os.fspath(database_path)
+        path = os.fsdecode(database_path)
         lock_fd: int | None = None
         connection: sqlite3.Connection | None = None
         try:
             if lock_instance and path != ":memory:":
                 lock_fd = cls._acquire_instance_lock(path)
-            connection = sqlite3.connect(path, isolation_level=None)
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys = ON")
-            connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
-            connection.execute("PRAGMA journal_mode = WAL")
-            connection.execute("PRAGMA synchronous = NORMAL")
-            store = cls(connection, database_path=path, lock_fd=lock_fd)
+            opened_connection = sqlite3.connect(path, isolation_level=None)
+            connection = opened_connection
+            opened_connection.row_factory = sqlite3.Row
+            opened_connection.execute("PRAGMA foreign_keys = ON")
+            opened_connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+            opened_connection.execute("PRAGMA journal_mode = WAL")
+            opened_connection.execute("PRAGMA synchronous = NORMAL")
+            store = cls(opened_connection, database_path=path, lock_fd=lock_fd)
             store._run_migrations()
             return store
         except BaseException:

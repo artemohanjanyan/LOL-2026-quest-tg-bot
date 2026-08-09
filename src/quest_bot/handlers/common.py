@@ -253,9 +253,8 @@ async def handle_error(
         details: dict[str, object] = {}
         if isinstance(update, Update):
             details["update_id"] = update.update_id
-            details["user_id"] = (
-                update.effective_user.id if update.effective_user is not None else None
-            )
+            user = update.effective_user
+            details["user_id"] = user.id if user is not None else None
             message = update.effective_message
             if message is not None and message.text:
                 details["command"] = message.text.split(maxsplit=1)[0]

@@ -200,7 +200,6 @@ class QuestService:
         if not stages:
             raise QuestNotReady("no stages")
 
-        unsolved: tuple[int, ...] = ()
         skipped = False
         next_stage: Stage | None
         if state.position is CaptainPosition.INTRO:

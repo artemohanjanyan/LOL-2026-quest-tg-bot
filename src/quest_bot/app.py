@@ -70,9 +70,7 @@ async def _timeout_sweep(context: ContextTypes.DEFAULT_TYPE) -> None:
     await _run_timeout_sweep(value)
     runs = int(context.application.bot_data[SWEEP_RUNS_KEY]) + 1
     context.application.bot_data[SWEEP_RUNS_KEY] = runs
-    heartbeat_every = int(
-        context.application.bot_data[SWEEP_HEARTBEAT_EVERY_KEY]
-    )
+    heartbeat_every = int(context.application.bot_data[SWEEP_HEARTBEAT_EVERY_KEY])
     if runs % heartbeat_every == 0:
         LOGGER.info(
             "Quest timeout sweep healthy: runs=%s duration_ms=%s",
@@ -90,9 +88,10 @@ async def _post_init(application: ApplicationType) -> None:
     application.bot_data[SWEEP_HEARTBEAT_EVERY_KEY] = math.ceil(
         SWEEP_HEARTBEAT_INTERVAL_SECONDS / interval
     )
-    if application.job_queue is None:
+    job_queue = application.job_queue
+    if job_queue is None:
         raise RuntimeError("PTB JobQueue extra is required")
-    application.job_queue.run_repeating(
+    job_queue.run_repeating(
         _timeout_sweep,
         interval=interval,
         first=interval,
