@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import math
+import time
 
 from telegram.ext import AIORateLimiter, ApplicationBuilder, ContextTypes
 from telegram.request import BaseRequest
@@ -17,7 +19,10 @@ from quest_bot.service import QuestService
 LOGGER = logging.getLogger(__name__)
 DEPENDENCIES_KEY = "quest_dependencies"
 SWEEP_INTERVAL_KEY = "quest_sweep_interval"
+SWEEP_RUNS_KEY = "quest_sweep_runs"
+SWEEP_HEARTBEAT_EVERY_KEY = "quest_sweep_heartbeat_every"
 OUTRO_CONCURRENCY = 5
+SWEEP_HEARTBEAT_INTERVAL_SECONDS = 5 * 60
 
 
 def _dependencies(application: ApplicationType) -> Dependencies:
@@ -61,7 +66,19 @@ async def _timeout_sweep(context: ContextTypes.DEFAULT_TYPE) -> None:
     value = context.application.bot_data[DEPENDENCIES_KEY]
     if not isinstance(value, Dependencies):
         raise RuntimeError("quest dependencies were not configured")
+    started_at = time.monotonic()
     await _run_timeout_sweep(value)
+    runs = int(context.application.bot_data[SWEEP_RUNS_KEY]) + 1
+    context.application.bot_data[SWEEP_RUNS_KEY] = runs
+    heartbeat_every = int(
+        context.application.bot_data[SWEEP_HEARTBEAT_EVERY_KEY]
+    )
+    if runs % heartbeat_every == 0:
+        LOGGER.info(
+            "Quest timeout sweep healthy: runs=%s duration_ms=%s",
+            runs,
+            round((time.monotonic() - started_at) * 1_000),
+        )
 
 
 async def _post_init(application: ApplicationType) -> None:
@@ -69,6 +86,10 @@ async def _post_init(application: ApplicationType) -> None:
     await application.bot.set_my_commands(COMMANDS)
     await _run_timeout_sweep(deps)
     interval = int(application.bot_data[SWEEP_INTERVAL_KEY])
+    application.bot_data[SWEEP_RUNS_KEY] = 0
+    application.bot_data[SWEEP_HEARTBEAT_EVERY_KEY] = math.ceil(
+        SWEEP_HEARTBEAT_INTERVAL_SECONDS / interval
+    )
     if application.job_queue is None:
         raise RuntimeError("PTB JobQueue extra is required")
     application.job_queue.run_repeating(
