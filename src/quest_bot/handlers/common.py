@@ -229,6 +229,8 @@ def expected_error_message(error: BaseException) -> str | None:
             return "Подорож ще не розпочалася. Команда для старту: /start"
         if reason == "task already solved":
             return messages.TASK_ALREADY_SOLVED
+        if reason == "attempts exhausted":
+            return messages.ATTEMPTS_EXHAUSTED
         if reason == "no current stage":
             return messages.NO_CURRENT_STAGE
         if reason == "answers require a stage":

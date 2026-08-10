@@ -224,6 +224,9 @@ def task_heading(
 
 TASK_NOT_FOUND = "Такого завдання немає на поточному етапі. Перевірте його номер."
 TASK_ALREADY_SOLVED = "Це завдання вже розв’язано — рухайтеся далі за маршрутом."
+ATTEMPTS_EXHAUSTED = (
+    "Спроби для цього завдання вичерпано. Нові відповіді на нього більше не приймаються."
+)
 ANSWER_NOT_AVAILABLE = "Відповідати можна лише на завдання поточного етапу."
 TERMINAL_PLAY_REJECTED = "Ця подорож уже завершена; нові відповіді та переходи закрито."
 
@@ -234,8 +237,16 @@ def answer_correct(*, points: int) -> str:
     return "Точна відповідь! Завдання розв’язано, хоча ця спроба вже не додає балів."
 
 
-def answer_incorrect(*, attempt_number: int) -> str:
-    return f"Відповідь не збігається. Це була спроба №{attempt_number}; звірте курс і спробуйте ще."
+def answer_incorrect(*, attempt_number: int, can_retry: bool = True) -> str:
+    if can_retry:
+        return (
+            f"Відповідь не збігається. Це була спроба №{attempt_number}; "
+            "звірте курс і спробуйте ще."
+        )
+    return (
+        f"Відповідь не збігається. Це була спроба №{attempt_number}. "
+        "Спроби для цього завдання вичерпано."
+    )
 
 
 def skip_warning(unsolved_task_numbers: Iterable[int]) -> str:

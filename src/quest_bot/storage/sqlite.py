@@ -29,6 +29,7 @@ from quest_bot.models import (
 )
 from quest_bot.normalization import normalize_answer
 from quest_bot.storage.base import (
+    AttemptLimitReachedError,
     DuplicateUpdateError,
     InstanceAlreadyRunningError,
     RecordNotFoundError,
@@ -892,6 +893,17 @@ class SQLiteQuestStore:
                     (user_id, stage_number, task_number),
                 ).fetchone()[0]
             )
+            score_row = connection.execute(
+                """
+                SELECT points FROM score_steps
+                WHERE attempt_number = ? AND points > 0
+                """,
+                (attempt_number,),
+            ).fetchone()
+            if score_row is None:
+                raise AttemptLimitReachedError(
+                    f"task {stage_number}.{task_number} has no scored attempts left"
+                )
             row = self._require_row(
                 connection.execute(
                     """

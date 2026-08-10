@@ -262,20 +262,26 @@ async def test_progress_reports_task_timing_attempts_and_points(
 
 
 @pytest.mark.asyncio
-async def test_zero_point_correct_answer_still_solves_task(bot_harness: BotHarness) -> None:
-    admin = bot_harness.user(ADMIN_ID, "organizer")
+async def test_zero_score_step_forbids_additional_attempts(bot_harness: BotHarness) -> None:
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
-    await admin.send("/set_scores 10 0")
     await captain.send("/start")
     await captain.send("/next_stage")
-    await captain.send("/answer 1 81")
+    await captain.send("/answer 1 first")
+    await captain.send("/answer 1 second")
+    await captain.send("/answer 1 third")
     await captain.send("/answer 1 80")
     await captain.send("/status")
 
     sent = bot_harness.telegram.messages_to(CAPTAIN_ID)
-    assert sent[-2] == messages.answer_correct(points=0)
-    assert "Завдання: 1 із 2 розв’язано" in sent[-1]
+    assert sent[-5:-2] == [
+        messages.answer_incorrect(attempt_number=1),
+        messages.answer_incorrect(attempt_number=2),
+        messages.answer_incorrect(attempt_number=3, can_retry=False),
+    ]
+    assert sent[-2] == messages.ATTEMPTS_EXHAUSTED
+    assert "Завдання: 0 із 2 розв’язано" in sent[-1]
     assert "Бали: 0" in sent[-1]
+    assert bot_harness.store.get_attempt_counts(CAPTAIN_ID, 1) == ((1, 3),)
 
 
 @pytest.mark.asyncio

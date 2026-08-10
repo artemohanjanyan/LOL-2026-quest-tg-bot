@@ -186,7 +186,10 @@ async def answer(
     if result.correct:
         text = messages.answer_correct(points=result.points)
     else:
-        text = messages.answer_incorrect(attempt_number=result.attempt_number)
+        text = messages.answer_incorrect(
+            attempt_number=result.attempt_number,
+            can_retry=result.can_retry,
+        )
     await send_text(update, deps, text)
 
 

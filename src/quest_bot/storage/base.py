@@ -26,5 +26,9 @@ class TaskAlreadySolvedError(StateConflictError):
     """Raised when a captain attempts a currently solved task."""
 
 
+class AttemptLimitReachedError(StateConflictError):
+    """Raised when the next attempt would be worth no points."""
+
+
 class TaskLimitExceededError(StoreError):
     """Raised when adding a task would exceed the per-stage limit."""

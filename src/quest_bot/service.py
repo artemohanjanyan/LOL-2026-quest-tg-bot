@@ -26,6 +26,7 @@ from quest_bot.models import (
     utc_now_ms,
 )
 from quest_bot.storage.base import (
+    AttemptLimitReachedError,
     RecordNotFoundError,
     StateConflictError,
     TaskAlreadySolvedError,
@@ -66,6 +67,7 @@ class AnswerResult:
     attempt_number: int
     correct: bool
     points: int
+    can_retry: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,6 +302,8 @@ class QuestService:
             )
         except TaskAlreadySolvedError as error:
             raise InvalidQuestState("task already solved") from error
+        except AttemptLimitReachedError as error:
+            raise InvalidQuestState("attempts exhausted") from error
         except RecordNotFoundError as error:
             raise NotFound("task") from error
         except StateConflictError as error:
@@ -308,7 +312,13 @@ class QuestService:
         score_steps = self.store.get_score_steps()
         index = stored.attempt_number - 1
         points = score_steps[index] if stored.correct and index < len(score_steps) else 0
-        return AnswerResult(stored.attempt_number, stored.correct, points)
+        next_attempt_index = stored.attempt_number
+        can_retry = (
+            not stored.correct
+            and next_attempt_index < len(score_steps)
+            and score_steps[next_attempt_index] > 0
+        )
+        return AnswerResult(stored.attempt_number, stored.correct, points, can_retry)
 
     def get_stage(self, actor_id: int) -> StagePresentation:
         self.require_user(actor_id)
