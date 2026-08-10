@@ -88,7 +88,14 @@ async def test_start_sends_intro_and_repeated_start_does_not_reset_timer(
 
     await captain.send("/start")
 
-    output = "\n".join(bot_harness.telegram.messages_to(CAPTAIN_ID)).casefold()
+    started = bot_harness.telegram.messages_to(CAPTAIN_ID)
+    assert started == [
+        messages.quest_started(limit_minutes=80),
+        messages.CAPTAIN_HELP,
+        "INTRO: Pack your carpetbag",
+        messages.INTRO_POSITION,
+    ]
+    output = "\n".join(started).casefold()
     assert "intro: pack your carpetbag" in output
     assert "task one prompt" not in output
     assert "лондон" not in output

@@ -53,6 +53,18 @@ def _clear_pending_skip(
     return user_data(context).pop(_pending_skip_key(update), None) is not None
 
 
+async def _send_help(update: Update, deps: Dependencies) -> None:
+    user = deps.service.require_user(actor_id(update))
+    await send_text(
+        update,
+        deps,
+        messages.help_message(
+            is_admin=user.role is UserRole.ADMIN,
+            is_owner_admin=deps.service.is_owner_admin(user.user_id),
+        ),
+    )
+
+
 async def _deliver_advance(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -98,6 +110,7 @@ async def start(
             deps,
             messages.quest_started(limit_minutes=snapshot.limit_minutes),
         )
+        await _send_help(update, deps)
         await deps.delivery.send_parts(current_chat_id, result.intro_parts)
         await send_text(update, deps, messages.INTRO_POSITION)
         return
@@ -232,15 +245,7 @@ async def help_command(
     *,
     deps: Dependencies,
 ) -> None:
-    user = deps.service.require_user(actor_id(update))
-    await send_text(
-        update,
-        deps,
-        messages.help_message(
-            is_admin=user.role is UserRole.ADMIN,
-            is_owner_admin=deps.service.is_owner_admin(user.user_id),
-        ),
-    )
+    await _send_help(update, deps)
 
 
 async def cancel(

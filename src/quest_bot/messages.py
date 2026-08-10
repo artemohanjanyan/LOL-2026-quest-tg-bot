@@ -23,13 +23,23 @@ NOTHING_TO_CANCEL = "Немає операції, яку можна скасув
 
 # Command help and usage -------------------------------------------------------
 
-CAPTAIN_HELP = """Команди капітана:
+ANSWER_GUIDE = """Формат: /answer <номер завдання> <відповідь>
+Відділяйте команду, номер завдання та відповідь пробілами.
+Приклади з вигаданими відповідями:
+/answer 5 42
+/answer 7 12 34 56
+/answer 9 навколо світу"""
+
+CAPTAIN_HELP = f"""Команди капітана:
 /start — розпочати відлік і отримати вступ
 /next_stage — перейти до наступного етапу
-/answer <номер> <відповідь> — подати відповідь
+/answer — подати відповідь на конкретне завдання
 /stage — повторно надіслати всі завдання поточного етапу
 /status — перевірити час і прогрес
-/help — показати цей маршрут"""
+/help — показати цей маршрут
+
+Як відповідати:
+{ANSWER_GUIDE}"""
 
 ADMIN_HELP = f"""{CAPTAIN_HELP}
 
@@ -75,7 +85,7 @@ OWNER_ADMIN_HELP = f"""{ADMIN_HELP}
 Керування організаторами:
 /add_admin <telegram_id> <username> — додати організатора"""
 
-USAGE_ANSWER = "Формат: /answer <номер завдання> <відповідь>"
+USAGE_ANSWER = ANSWER_GUIDE
 USAGE_ADD_ADMIN = "Формат: /add_admin <telegram_id> <username>"
 USAGE_ADD_CAPTAIN = (
     "Формат: /add_captain <telegram_id> [username]. Username обов’язковий для нового капітана."
