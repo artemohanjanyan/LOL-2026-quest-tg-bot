@@ -127,6 +127,21 @@ async def test_unknown_commands_and_messages_receive_guidance(
 
 
 @pytest.mark.asyncio
+async def test_edited_commands_are_ignored(bot_harness: BotHarness) -> None:
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    bot_harness.telegram.clear()
+
+    await captain.edit_last_message("/answer 1 80")
+
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == []
+    task = bot_harness.store.list_task_progress(CAPTAIN_ID)[0]
+    assert task.attempt_count == 0
+    assert not task.solved
+
+
+@pytest.mark.asyncio
 async def test_incoming_updates_and_outgoing_responses_are_logged(
     bot_harness: BotHarness,
     caplog: pytest.LogCaptureFixture,

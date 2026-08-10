@@ -33,6 +33,13 @@ async def log_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     LOGGER.info("Telegram update received: %s", update.to_json())
 
 
+async def ignore_edited_message(
+    _update: Update,
+    _context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Consume edits that Telegram queued before the polling filter took effect."""
+
+
 async def unknown_command(update: Update, context: object, *, deps: Dependencies) -> None:
     await send_text(update, deps, messages.UNKNOWN_COMMAND)
 
@@ -46,6 +53,7 @@ def register_handlers(
     deps: Dependencies,
 ) -> None:
     application.add_handler(TypeHandler(Update, log_update), group=-1)
+    application.add_handler(MessageHandler(filters.UpdateType.EDITED, ignore_edited_message))
     # The content conversation comes first so /done and /cancel are routed back
     # to the active per-user, per-chat draft before ordinary command handlers.
     modules = (content, users, operations, reports, captain)

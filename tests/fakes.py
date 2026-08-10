@@ -128,6 +128,7 @@ class TelegramUser:
         self._next_update_id = user_id * 1_000
         self._timestamp = timestamp
         self._last_update: Update | None = None
+        self._last_message: dict[str, Any] | None = None
 
     async def send(self, text: str) -> None:
         await self.send_message(text=text)
@@ -178,6 +179,29 @@ class TelegramUser:
             self.application.bot,
         )
         self._last_update = update
+        self._last_message = message
+        await self.application.process_update(update)
+
+    async def edit_last_message(self, text: str) -> None:
+        if self._last_message is None or "text" not in self._last_message:
+            raise RuntimeError("No text message is available to edit")
+        self._next_update_id += 1
+        self._timestamp += 1
+        message: dict[str, Any] = {
+            **self._last_message,
+            "text": text,
+            "edit_date": self._timestamp,
+        }
+        message.pop("entities", None)
+        if text.startswith("/"):
+            command = text.split(maxsplit=1)[0]
+            message["entities"] = [{"type": "bot_command", "offset": 0, "length": len(command)}]
+        update = Update.de_json(
+            {"update_id": self._next_update_id, "edited_message": message},
+            self.application.bot,
+        )
+        self._last_update = update
+        self._last_message = message
         await self.application.process_update(update)
 
     async def replay_last_update(self) -> None:

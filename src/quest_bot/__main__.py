@@ -40,7 +40,7 @@ def main() -> None:
             store.schema_version,
             settings.sweep_interval_seconds,
         )
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        application.run_polling(allowed_updates=(Update.MESSAGE,))
 
 
 if __name__ == "__main__":
