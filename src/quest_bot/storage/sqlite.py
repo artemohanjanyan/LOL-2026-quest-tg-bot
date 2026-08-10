@@ -941,17 +941,37 @@ class SQLiteQuestStore:
     def list_task_progress(self, user_id: int) -> tuple[TaskProgress, ...]:
         rows = self._connection_or_raise().execute(
             """
+            WITH attempt_totals AS (
+                SELECT stage_number,
+                       task_number,
+                       count(*) AS attempt_count,
+                       max(event_at_ms) AS last_attempt_at_ms
+                FROM task_attempts
+                WHERE user_id = ?
+                GROUP BY stage_number, task_number
+            )
             SELECT task_progress.stage_number,
                    task_progress.task_number,
                    task_progress.attempt_number,
-                   coalesce(score_steps.points, 0) AS points
+                   coalesce(score_steps.points, 0) AS points,
+                   coalesce(attempt_totals.attempt_count, 0) AS attempt_count,
+                   solved_attempt.event_at_ms AS solved_at_ms,
+                   attempt_totals.last_attempt_at_ms
             FROM task_progress
             LEFT JOIN score_steps
               ON score_steps.attempt_number = task_progress.attempt_number
+            LEFT JOIN attempt_totals
+              ON attempt_totals.stage_number = task_progress.stage_number
+             AND attempt_totals.task_number = task_progress.task_number
+            LEFT JOIN task_attempts AS solved_attempt
+              ON solved_attempt.user_id = task_progress.user_id
+             AND solved_attempt.stage_number = task_progress.stage_number
+             AND solved_attempt.task_number = task_progress.task_number
+             AND solved_attempt.attempt_number = task_progress.attempt_number
             WHERE task_progress.user_id = ?
             ORDER BY task_progress.stage_number, task_progress.task_number
             """,
-            (user_id,),
+            (user_id, user_id),
         )
         return tuple(
             TaskProgress(
@@ -959,6 +979,9 @@ class SQLiteQuestStore:
                 task_number=int(row["task_number"]),
                 solved_attempt_number=self._optional_int(row["attempt_number"]),
                 points=int(row["points"]),
+                attempt_count=int(row["attempt_count"]),
+                solved_at_ms=self._optional_int(row["solved_at_ms"]),
+                last_attempt_at_ms=self._optional_int(row["last_attempt_at_ms"]),
             )
             for row in rows
         )

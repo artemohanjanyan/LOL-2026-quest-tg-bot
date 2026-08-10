@@ -109,6 +109,9 @@ class TaskProgress:
     task_number: int
     solved_attempt_number: int | None
     points: int
+    attempt_count: int
+    solved_at_ms: int | None
+    last_attempt_at_ms: int | None
 
     @property
     def solved(self) -> bool:

@@ -20,6 +20,7 @@ from quest_bot.models import (
     OutroKind,
     Stage,
     Task,
+    TaskProgress,
     User,
     UserRole,
     utc_now_ms,
@@ -77,6 +78,14 @@ class StatusSnapshot:
     stage: Stage | None = None
     solved_tasks: int = 0
     total_tasks: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CaptainProgressReport:
+    snapshot: StatusSnapshot
+    started_at_ms: int | None
+    tasks: tuple[TaskProgress, ...]
+    stages: tuple[Stage, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -514,21 +523,27 @@ class QuestService:
             )
         )
 
-    def captain_status(self, actor_id: int, reference: str) -> StatusSnapshot:
+    def captain_progress(self, actor_id: int, reference: str) -> CaptainProgressReport:
         self.require_admin(actor_id)
         target = self.resolve_user(reference)
-        return self._status_snapshot(target)
-
-    def captain_attempt_counts(
-        self,
-        actor_id: int,
-        reference: str,
-        *,
-        stage_number: int,
-    ) -> tuple[tuple[int, int], ...]:
-        self.require_admin(actor_id)
-        target = self.resolve_user(reference)
-        return self.store.get_attempt_counts(target.user_id, stage_number)
+        snapshot = self._status_snapshot(target)
+        started_at_ms = None
+        if snapshot.state.started_at_ms is not None:
+            started_at_ms = next(
+                (
+                    transition.event_at_ms
+                    for transition in reversed(self.store.list_captain_transitions(target.user_id))
+                    if transition.from_position is CaptainPosition.NOT_STARTED
+                    and transition.to_position is CaptainPosition.INTRO
+                ),
+                snapshot.state.started_at_ms,
+            )
+        return CaptainProgressReport(
+            snapshot=snapshot,
+            started_at_ms=started_at_ms,
+            tasks=self.store.list_task_progress(target.user_id),
+            stages=self.store.list_stages(),
+        )
 
     def resolve_user(self, reference: str) -> User:
         cleaned = reference.strip().lstrip("@")

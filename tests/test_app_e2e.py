@@ -234,7 +234,31 @@ async def test_duplicate_answer_update_does_not_create_another_attempt(
     ]
     progress = bot_harness.telegram.messages_to(ADMIN_ID)[-1]
     assert "Бали: 10" in progress
-    assert "№1: 1 спроб" in progress
+    assert "№1 — розв’язано +00:02; спроб: 1; балів: 10" in progress
+
+
+@pytest.mark.asyncio
+async def test_progress_reports_task_timing_attempts_and_points(
+    bot_harness: BotHarness,
+) -> None:
+    seed_second_stage(bot_harness.store)
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/answer 1 79")
+    await captain.send("/answer 1 80")
+    await captain.send("/answer 3 someone else")
+
+    await admin.send("/progress passepartout")
+
+    progress = bot_harness.telegram.messages_to(ADMIN_ID)[-1]
+    assert "Загалом: 1 із 3 завдань розв’язано; спроб: 3." in progress
+    assert "Етап 1: Лондон" in progress
+    assert "№1 — розв’язано +00:03; спроб: 2; балів: 8" in progress
+    assert "№3 — не розв’язано; спроб: 1; остання +00:04" in progress
+    assert "Етап 4: Суець" in progress
+    assert "№2 — без спроб" in progress
 
 
 @pytest.mark.asyncio
