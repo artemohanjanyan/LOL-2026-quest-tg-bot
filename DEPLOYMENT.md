@@ -50,8 +50,9 @@ uv sync --locked --no-dev --no-editable
 
 `--locked` rejects an out-of-date lock file rather than changing dependencies on
 the server. `--no-dev` excludes test and lint tools. `--no-editable` installs an
-immutable copy of the application into `.venv`, so deployment changes take
-effect only after another sync and restart.
+immutable copy of the application into `.venv`. Because uv's default cache key
+does not track ordinary changes under `src/`, routine deployments must explicitly
+reinstall the application package before restarting the service.
 
 The preferred runtime command is then:
 
@@ -137,7 +138,8 @@ A simple manual update sequence is:
 ```bash
 cd /opt/lol-2026-quest-tg-bot
 git pull --ff-only
-uv sync --locked --no-dev --no-editable
+uv sync --locked --no-dev --no-editable \
+  --reinstall-package lol-2026-quest-tg-bot
 sudo systemctl restart lol-2026-quest-bot
 sudo systemctl status lol-2026-quest-bot
 ```
