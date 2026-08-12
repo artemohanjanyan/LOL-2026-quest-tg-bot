@@ -48,6 +48,7 @@ class ContentDraft:
     kind: DraftKind
     stage_number: int | None = None
     task_number: int | None = None
+    task_name: str | None = None
     correct_answer: str | None = None
     parts: list[ContentPart] = field(default_factory=list)
 
@@ -93,11 +94,15 @@ async def begin_task(
     deps: Dependencies,
 ) -> int:
     deps.service.require_admin(actor_id(update))
-    numbers = parse_integer_args(context, count=2)
-    if numbers is None:
+    args = command_args(context)
+    if len(args) < 2:
         await send_text(update, deps, messages.USAGE_SET_TASK)
         return ConversationHandler.END
-    stage_number, task_number = numbers
+    try:
+        stage_number, task_number = map(int, args[:2])
+    except ValueError:
+        await send_text(update, deps, messages.USAGE_SET_TASK)
+        return ConversationHandler.END
     if stage_number <= 0 or task_number <= 0:
         await send_text(update, deps, messages.USAGE_SET_TASK)
         return ConversationHandler.END
@@ -108,6 +113,7 @@ async def begin_task(
             DraftKind.TASK,
             stage_number=stage_number,
             task_number=task_number,
+            task_name=" ".join(args[2:]).strip() or None,
         ),
     )
     await send_text(
@@ -202,6 +208,7 @@ async def done(
                 draft.task_number,
                 draft.correct_answer,
                 draft.parts,
+                name=draft.task_name,
             )
         else:
             delivered = 0
@@ -349,10 +356,11 @@ async def show_task(
         return
     stage_number, task_number = numbers
     task = deps.service.show_task(actor_id(update), stage_number, task_number)
+    rendered_name = f" — {task.name}" if task.name is not None else ""
     await send_text(
         update,
         deps,
-        f"Етап {stage_number}, завдання {task_number}.\n"
+        f"Етап {stage_number}, завдання {task_number}{rendered_name}.\n"
         f"Правильна відповідь: {task.correct_answer_raw}",
     )
     await deps.delivery.send_parts(chat_id(update), task.prompt_parts)

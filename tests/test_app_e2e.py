@@ -196,13 +196,21 @@ async def test_next_stage_prints_name_labels_and_every_task_prompt(
     ]
     assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
         messages.stage_heading(1, "Лондон"),
-        messages.task_heading(1, "Лондон", 1, 2),
+        messages.task_heading(1, "Лондон", 1, 2, "Реформ-клуб"),
         "TASK ONE PROMPT: How many days?",
         messages.task_heading(3, "Лондон", 2, 2),
         "TASK THREE PROMPT: Name the traveller",
     ]
     assert calls[-2][1]["document"] == "telegram-pdf-id"
     assert calls[-1][1]["video"] == "telegram-video-id"
+    assert calls[1][1]["entities"] == [
+        {
+            "type": "bold",
+            "offset": len("Завдання 1 — Лондон — "),
+            "length": len("Реформ-клуб"),
+        }
+    ]
+    assert "entities" not in calls[3][1]
 
 
 @pytest.mark.asyncio
@@ -237,10 +245,13 @@ async def test_answers_and_live_configuration_recalculate_visible_score(
     assert "Бали: 7" in bot_harness.telegram.messages_to(CAPTAIN_ID)[-1]
 
     await admin.send("/delete_task 1 1")
-    await admin.send("/set_task 1 1")
+    await admin.send("/set_task 1 1 Нове парі")
     await admin.send("Replacement prompt")
     await admin.send("/correct_answer 81")
     await admin.send("/done")
+    replacement = bot_harness.store.get_task(1, 1)
+    assert replacement is not None
+    assert replacement.name == "Нове парі"
     await captain.send("/status")
 
     recalculated = bot_harness.telegram.messages_to(CAPTAIN_ID)[-1]

@@ -28,6 +28,7 @@ def seed_ready_quest(store: SQLiteQuestStore) -> None:
         1,
         "80",
         [ContentPart(ContentType.TEXT, "TASK ONE PROMPT: How many days?")],
+        name="Реформ-клуб",
     )
     store.set_task(
         1,

@@ -477,8 +477,11 @@ class SQLiteQuestStore:
         task_number: int,
         correct_answer: str,
         prompt_parts: Sequence[ContentPart],
+        *,
+        name: str | None = None,
     ) -> Task:
         normalized_answer = normalize_answer(correct_answer)
+        normalized_name = name.strip() or None if name is not None else None
         parts = tuple(prompt_parts)
         if not parts:
             raise ValueError("task prompt must contain at least one part")
@@ -509,15 +512,22 @@ class SQLiteQuestStore:
                 connection.execute(
                     """
                 INSERT INTO tasks (
-                    stage_number, task_number,
+                    stage_number, task_number, name,
                     correct_answer_raw, correct_answer_normalized
-                ) VALUES (?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(stage_number, task_number) DO UPDATE SET
+                    name = excluded.name,
                     correct_answer_raw = excluded.correct_answer_raw,
                     correct_answer_normalized = excluded.correct_answer_normalized
                 RETURNING *
                     """,
-                    (stage_number, task_number, correct_answer, normalized_answer),
+                    (
+                        stage_number,
+                        task_number,
+                        normalized_name,
+                        correct_answer,
+                        normalized_answer,
+                    ),
                 ).fetchone(),
                 "task",
             )
@@ -1115,6 +1125,7 @@ class SQLiteQuestStore:
         return Task(
             stage_number=int(row["stage_number"]),
             task_number=int(row["task_number"]),
+            name=None if row["name"] is None else str(row["name"]),
             correct_answer_raw=str(row["correct_answer_raw"]),
             prompt_parts=prompt_parts,
         )

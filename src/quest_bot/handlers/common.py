@@ -1,11 +1,12 @@
 """Shared Telegram-boundary helpers and dependency container."""
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
-from telegram import Message, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import Message, MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.ext import Application, BaseHandler, ContextTypes, ExtBot, JobQueue
 
 from quest_bot import messages
@@ -166,11 +167,13 @@ async def send_text(
     text: str,
     *,
     reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None = None,
+    entities: Sequence[MessageEntity] | None = None,
 ) -> None:
     await deps.delivery.send_part(
         chat_id(update),
         ContentPart(ContentType.TEXT, text),
         reply_markup=reply_markup,
+        entities=entities,
     )
 
 
@@ -185,15 +188,25 @@ async def send_stage(update: Update, deps: Dependencies, presentation: StagePres
     )
     total = len(presentation.tasks)
     for ordinal, task in enumerate(presentation.tasks, start=1):
+        heading = messages.task_heading(
+            task.task_number,
+            presentation.stage.name,
+            ordinal,
+            total,
+            task.name,
+        )
+        entities = None
+        if task.name is not None:
+            name_offset = len(f"Завдання {task.task_number} — {presentation.stage.name} — ")
+            entities = MessageEntity.adjust_message_entities_to_utf_16(
+                heading,
+                [MessageEntity(MessageEntity.BOLD, name_offset, len(task.name))],
+            )
         await send_text(
             update,
             deps,
-            messages.task_heading(
-                task.task_number,
-                presentation.stage.name,
-                ordinal,
-                total,
-            ),
+            heading,
+            entities=entities,
         )
         await deps.delivery.send_parts(chat_id(update), task.prompt_parts)
 

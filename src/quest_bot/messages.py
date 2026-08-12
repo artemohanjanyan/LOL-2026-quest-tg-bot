@@ -60,7 +60,7 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 /set_success_outro — налаштувати успішний фінал
 /set_timeout_outro — налаштувати фінал за часом
 /set_stage <номер> <назва> — створити або перейменувати етап
-/set_task <етап> <завдання> — налаштувати завдання
+/set_task <етап> <завдання> [назва] — налаштувати завдання
 /delete_stage <номер> — видалити етап
 /delete_task <етап> <завдання> — видалити завдання
 
@@ -97,7 +97,7 @@ USAGE_REMOVE_CAPTAIN = "Формат: /remove_captain <telegram_id>"
 USAGE_RESET_CAPTAIN = "Формат: /reset_captain <@username або telegram_id>"
 USAGE_PROGRESS = "Формат: /progress <@username або telegram_id>"
 USAGE_SET_STAGE = "Формат: /set_stage <номер етапу> <назва>"
-USAGE_SET_TASK = "Формат: /set_task <номер етапу> <номер завдання>"
+USAGE_SET_TASK = "Формат: /set_task <номер етапу> <номер завдання> [назва завдання]"
 USAGE_CORRECT_ANSWER = "Формат: /correct_answer <відповідь>"
 USAGE_DELETE_STAGE = "Формат: /delete_stage <номер етапу>"
 USAGE_DELETE_TASK = "Формат: /delete_task <номер етапу> <номер завдання>"
@@ -229,8 +229,10 @@ def task_heading(
     stage_name: str,
     ordinal: int,
     total: int,
+    task_name: str | None = None,
 ) -> str:
-    return f"Завдання {task_number} — {stage_name} ({ordinal} із {total})"
+    name = f" — {task_name}" if task_name is not None else ""
+    return f"Завдання {task_number} — {stage_name}{name} ({ordinal} із {total})"
 
 
 # Answers and transitions ------------------------------------------------------

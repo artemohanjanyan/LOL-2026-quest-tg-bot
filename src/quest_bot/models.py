@@ -70,6 +70,7 @@ class Stage:
 class Task:
     stage_number: int
     task_number: int
+    name: str | None
     correct_answer_raw: str
     prompt_parts: tuple[ContentPart, ...]
 

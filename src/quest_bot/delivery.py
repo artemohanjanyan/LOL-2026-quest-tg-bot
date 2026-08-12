@@ -2,13 +2,13 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import count
 from typing import Final, assert_never
 
-from telegram import Bot, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Bot, Message, MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.error import (
     BadRequest,
     Forbidden,
@@ -68,22 +68,29 @@ class TelegramDelivery:
         part: ContentPart,
         *,
         reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None = None,
+        entities: Sequence[MessageEntity] | None = None,
     ) -> Message:
         """Send one part using its matching Telegram Bot API method."""
 
         request_id = next(self._request_ids)
         LOGGER.info(
             "Telegram request: request_id=%s chat_id=%s content_type=%s "
-            "data=%r caption=%r reply_markup=%r",
+            "data=%r caption=%r reply_markup=%r entities=%r",
             request_id,
             chat_id,
             part.content_type.value,
             part.data,
             part.caption,
             reply_markup,
+            entities,
         )
         try:
-            response = await self._send_part(chat_id, part, reply_markup=reply_markup)
+            response = await self._send_part(
+                chat_id,
+                part,
+                reply_markup=reply_markup,
+                entities=entities,
+            )
         except Exception as error:
             safe_error = str(error).replace(self._bot.token, "<redacted>")
             LOGGER.warning(
@@ -111,6 +118,7 @@ class TelegramDelivery:
         part: ContentPart,
         *,
         reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None,
+        entities: Sequence[MessageEntity] | None,
     ) -> Message:
         """Call the matching Telegram Bot API method."""
 
@@ -121,6 +129,7 @@ class TelegramDelivery:
                     text=part.data,
                     parse_mode=PLAIN_PARSE_MODE,
                     reply_markup=reply_markup,
+                    entities=entities,
                 )
             case ContentType.PHOTO:
                 return await self._bot.send_photo(

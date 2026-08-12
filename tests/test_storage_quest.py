@@ -52,7 +52,7 @@ def start_and_enter_first_stage(store: SQLiteQuestStore) -> None:
     assert entered.position is CaptainPosition.STAGE
 
 
-def test_v1_usernames_migrate_to_presentation_ready_display_names(tmp_path: Path) -> None:
+def test_v1_database_migrates_usernames_and_adds_optional_task_names(tmp_path: Path) -> None:
     database = tmp_path / "quest.db"
     migration_root = resources.files("quest_bot.storage.migrations")
     with sqlite3.connect(database) as connection:
@@ -73,12 +73,18 @@ def test_v1_usernames_migrate_to_presentation_ready_display_names(tmp_path: Path
             "INSERT INTO users VALUES (?, ?, 'captain', 1, ?)",
             (CAPTAIN_ID, "passepartout", BASE_TIME_MS),
         )
+        connection.execute("INSERT INTO stages VALUES (1, 'Лондон')")
+        connection.execute("INSERT INTO tasks VALUES (1, 1, '80', '80')")
+        connection.execute("INSERT INTO task_prompt_parts VALUES (1, 1, 1, 'text', 'Prompt', NULL)")
 
     with SQLiteQuestStore.open(database, lock_instance=False) as migrated:
-        assert migrated.schema_version == 2
+        assert migrated.schema_version == 3
         captain = migrated.get_user(CAPTAIN_ID)
         assert captain is not None
         assert captain.display_name == "@passepartout"
+        task = migrated.get_task(1, 1)
+        assert task is not None
+        assert task.name is None
 
     with sqlite3.connect(database) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
@@ -86,6 +92,9 @@ def test_v1_usernames_migrate_to_presentation_ready_display_names(tmp_path: Path
     assert "display_name" in columns
     assert "username" not in columns
     assert "users_display_name_nocase_idx" in indexes
+    with sqlite3.connect(database) as connection:
+        task_columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
+    assert "name" in task_columns
 
 
 def test_transition_history_preserves_metadata_and_update_idempotency(

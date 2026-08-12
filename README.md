@@ -51,7 +51,9 @@ Multipart `/set_intro`, `/set_success_outro`, `/set_timeout_outro`, `/set_task`,
 and `/broadcast` workflows accept text, photo, sticker, voice, document, video,
 and video-note messages. Send parts in order and publish with `/done`; `/cancel`
 discards the in-memory draft. Task drafts additionally require
-`/correct_answer <answer>`. Stage names are configured directly with
+`/correct_answer <answer>`. Tasks may have an optional name supplied through
+`/set_task <stage-number> <task-number> [name]`; the bot emphasizes that name in
+bold when presenting the task. Stage names are configured directly with
 `/set_stage <number> <name>`; there is deliberately no stage-level prompt.
 
 Configuration is global and live rather than versioned. Task attempts are
