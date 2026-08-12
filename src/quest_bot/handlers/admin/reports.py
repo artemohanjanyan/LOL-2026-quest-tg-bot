@@ -38,7 +38,7 @@ async def leaderboard(
     for place, summary in enumerate(rows, start=1):
         position = position_names[summary.state.position]
         lines.append(
-            f"{place}. @{summary.user.username} — {summary.total_score} балів; "
+            f"{place}. {summary.user.display_name} — {summary.total_score} балів; "
             f"{summary.solved_tasks}/{summary.total_tasks}; {position}"
         )
     await send_text(update, deps, "\n".join(lines))
@@ -56,7 +56,7 @@ async def progress(
         return
     report = deps.service.captain_progress(actor_id(update), args[0])
     snapshot = report.snapshot
-    lines = [f"Капітан @{snapshot.user.username}", render_status(snapshot)]
+    lines = [f"Капітан {snapshot.user.display_name}", render_status(snapshot)]
     solved_tasks = sum(task.solved for task in report.tasks)
     attempt_count = sum(task.attempt_count for task in report.tasks)
     lines.extend(

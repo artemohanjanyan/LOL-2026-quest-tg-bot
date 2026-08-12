@@ -29,7 +29,7 @@ The environment file should contain absolute production paths:
 TOKEN=replace-with-the-current-token
 QUEST_DB_PATH=/var/lib/lol-2026-quest-tg-bot/quest.db
 QUEST_ADMIN_ID=123456789
-QUEST_ADMIN_USERNAME=organizer
+QUEST_ADMIN_DISPLAY_NAME=@organizer
 ```
 
 Protect it:
@@ -132,6 +132,10 @@ The application's database lock remains a second line of defense against two bot
 instances using the same database.
 
 ## Updating the deployment
+
+When upgrading from a release that used `QUEST_ADMIN_USERNAME`, rename it to
+`QUEST_ADMIN_DISPLAY_NAME` and include the presentation-ready value (normally
+with `@`). Startup migrates existing stored usernames in the same way.
 
 A simple manual update sequence is:
 

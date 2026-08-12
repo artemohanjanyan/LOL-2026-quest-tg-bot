@@ -8,7 +8,7 @@ from datetime import timedelta
 from itertools import count
 from typing import Final, assert_never
 
-from telegram import Bot, Message
+from telegram import Bot, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.error import (
     BadRequest,
     Forbidden,
@@ -62,20 +62,28 @@ class TelegramDelivery:
         for part in parts:
             await self.send_part(chat_id, part)
 
-    async def send_part(self, chat_id: int, part: ContentPart) -> Message:
+    async def send_part(
+        self,
+        chat_id: int,
+        part: ContentPart,
+        *,
+        reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None = None,
+    ) -> Message:
         """Send one part using its matching Telegram Bot API method."""
 
         request_id = next(self._request_ids)
         LOGGER.info(
-            "Telegram request: request_id=%s chat_id=%s content_type=%s data=%r caption=%r",
+            "Telegram request: request_id=%s chat_id=%s content_type=%s "
+            "data=%r caption=%r reply_markup=%r",
             request_id,
             chat_id,
             part.content_type.value,
             part.data,
             part.caption,
+            reply_markup,
         )
         try:
-            response = await self._send_part(chat_id, part)
+            response = await self._send_part(chat_id, part, reply_markup=reply_markup)
         except Exception as error:
             safe_error = str(error).replace(self._bot.token, "<redacted>")
             LOGGER.warning(
@@ -97,7 +105,13 @@ class TelegramDelivery:
         )
         return response
 
-    async def _send_part(self, chat_id: int, part: ContentPart) -> Message:
+    async def _send_part(
+        self,
+        chat_id: int,
+        part: ContentPart,
+        *,
+        reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None,
+    ) -> Message:
         """Call the matching Telegram Bot API method."""
 
         match part.content_type:
@@ -106,6 +120,7 @@ class TelegramDelivery:
                     chat_id=chat_id,
                     text=part.data,
                     parse_mode=PLAIN_PARSE_MODE,
+                    reply_markup=reply_markup,
                 )
             case ContentType.PHOTO:
                 return await self._bot.send_photo(

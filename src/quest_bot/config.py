@@ -12,7 +12,7 @@ class Settings:
     token: str
     database_path: Path
     bootstrap_admin_id: int | None = None
-    bootstrap_admin_username: str = "admin"
+    bootstrap_admin_display_name: str = "@admin"
     sweep_interval_seconds: int = 15
     database_busy_timeout_ms: int = 5_000
     delivery_rate_per_second: int = 20
@@ -28,8 +28,8 @@ class Settings:
             raise ValueError("delivery rate must be positive")
         if self.bootstrap_admin_id is not None and self.bootstrap_admin_id <= 0:
             raise ValueError("bootstrap admin ID must be positive")
-        if self.bootstrap_admin_id is not None and not self.bootstrap_admin_username.strip():
-            raise ValueError("bootstrap admin username must not be empty")
+        if self.bootstrap_admin_id is not None and not self.bootstrap_admin_display_name.strip():
+            raise ValueError("bootstrap admin display name must not be empty")
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -42,5 +42,5 @@ class Settings:
             token=token,
             database_path=database_path,
             bootstrap_admin_id=admin_id,
-            bootstrap_admin_username=os.getenv("QUEST_ADMIN_USERNAME", "admin"),
+            bootstrap_admin_display_name=os.getenv("QUEST_ADMIN_DISPLAY_NAME", "@admin"),
         )

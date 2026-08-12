@@ -46,12 +46,13 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 Команди організатора:
 
 Учасники, результати й зв’язок:
-/add_captain <telegram_id> [username] — додати або активувати капітана
+/add_captain — обрати й додати або активувати капітана
+/add_captain_by_id <telegram_id> [display_name] — додати капітана вручну
 /remove_captain <telegram_id> — деактивувати капітана
-/reset_captain <username|telegram_id> — підготувати скидання прогресу
+/reset_captain <@username|telegram_id> — підготувати скидання прогресу
 /list_users — показати учасників
 /leaderboard — показати таблицю результатів
-/progress <username|telegram_id> — показати прогрес капітана
+/progress <@username|telegram_id> — показати прогрес капітана
 /broadcast — підготувати оголошення
 
 Редагування маршруту:
@@ -83,16 +84,18 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 OWNER_ADMIN_HELP = f"""{ADMIN_HELP}
 
 Керування організаторами:
-/add_admin <telegram_id> <username> — додати організатора"""
+/add_admin <telegram_id> <display_name> — додати організатора"""
 
 USAGE_ANSWER = ANSWER_GUIDE
-USAGE_ADD_ADMIN = "Формат: /add_admin <telegram_id> <username>"
-USAGE_ADD_CAPTAIN = (
-    "Формат: /add_captain <telegram_id> [username]. Username обов’язковий для нового капітана."
+USAGE_ADD_ADMIN = "Формат: /add_admin <telegram_id> <display_name>"
+USAGE_ADD_CAPTAIN = "Формат: /add_captain"
+USAGE_ADD_CAPTAIN_BY_ID = (
+    "Формат: /add_captain_by_id <telegram_id> [display_name]. "
+    "Display name обов’язкове для нового капітана."
 )
 USAGE_REMOVE_CAPTAIN = "Формат: /remove_captain <telegram_id>"
-USAGE_RESET_CAPTAIN = "Формат: /reset_captain <username або telegram_id>"
-USAGE_PROGRESS = "Формат: /progress <username або telegram_id>"
+USAGE_RESET_CAPTAIN = "Формат: /reset_captain <@username або telegram_id>"
+USAGE_PROGRESS = "Формат: /progress <@username або telegram_id>"
 USAGE_SET_STAGE = "Формат: /set_stage <номер етапу> <назва>"
 USAGE_SET_TASK = "Формат: /set_task <номер етапу> <номер завдання>"
 USAGE_CORRECT_ANSWER = "Формат: /correct_answer <відповідь>"
@@ -291,7 +294,17 @@ CORRECT_ANSWER_SAVED = "Правильну відповідь додано до 
 CONTENT_PART_ADDED = "Частину додано до чернетки."
 CONTENT_DELETED = "Вміст видалено з поточної мапи."
 STAGE_NOT_FOUND = "Етап із таким номером не знайдено."
-CAPTAIN_NOT_FOUND = "Капітана не знайдено. Перевірте username або Telegram ID."
+CAPTAIN_NOT_FOUND = "Капітана не знайдено. Перевірте @username або Telegram ID."
+CAPTAIN_PICKER_PROMPT = (
+    "Натисніть «Обрати капітана» й виберіть одну людину. Щоб скасувати операцію, надішліть /cancel."
+)
+CAPTAIN_PICKER_BUTTON = "Обрати капітана"
+CAPTAIN_PICKER_STALE = "Цей вибір застарів. Почніть знову з /add_captain."
+CAPTAIN_PICKER_CANCELLED = "Додавання капітана скасовано."
+CAPTAIN_PICKER_NAME_MISSING = (
+    "Telegram не передав ім’я вибраного користувача. "
+    "Спробуйте ще раз або зверніться до головного організатора."
+)
 NO_RESET_CONFIRMATION = "Немає скидання прогресу, яке очікує підтвердження."
 RESET_CANCELLED = "Скидання прогресу скасовано; дані капітана не змінено."
 RESET_TARGET_CHANGED = (
@@ -299,30 +312,38 @@ RESET_TARGET_CHANGED = (
 )
 
 
-def captain_added(username: str, telegram_id: int) -> str:
-    return f"Капітана {username} ({telegram_id}) додано до експедиції."
+def captain_added(display_name: str, telegram_id: int) -> str:
+    return f"Капітана {display_name} ({telegram_id}) додано до експедиції."
 
 
-def admin_added(username: str, telegram_id: int) -> str:
-    return f"Організатора {username} ({telegram_id}) додано до штабу експедиції."
+def captain_already_active(display_name: str) -> str:
+    return f"Капітан {display_name} уже є в активному списку мандрівників."
 
 
-def captain_removed(username: str, telegram_id: int) -> str:
-    return f"Капітана {username} ({telegram_id}) деактивовано; історію подорожі збережено."
+def selected_user_is_admin(display_name: str) -> str:
+    return f"{display_name} уже є організатором; роль не змінено."
 
 
-def captain_reset_warning(username: str, telegram_id: int) -> str:
+def admin_added(display_name: str, telegram_id: int) -> str:
+    return f"Організатора {display_name} ({telegram_id}) додано до штабу експедиції."
+
+
+def captain_removed(display_name: str, telegram_id: int) -> str:
+    return f"Капітана {display_name} ({telegram_id}) деактивовано; історію подорожі збережено."
+
+
+def captain_reset_warning(display_name: str, telegram_id: int) -> str:
     return (
-        f"Увага: ви збираєтеся скинути прогрес капітана @{username} ({telegram_id}). "
+        f"Увага: ви збираєтеся скинути прогрес капітана {display_name} ({telegram_id}). "
         "Позиція, час старту та всі спроби будуть скинуті; історія переходів залишиться. "
         "Самі відповіді відновити з історії переходів неможливо. "
         "Для підтвердження надішліть /confirm_reset_captain, для скасування — /cancel."
     )
 
 
-def captain_reset(username: str, telegram_id: int) -> str:
+def captain_reset(display_name: str, telegram_id: int) -> str:
     return (
-        f"Прогрес капітана @{username} ({telegram_id}) скинуто. "
+        f"Прогрес капітана {display_name} ({telegram_id}) скинуто. "
         "Капітан може розпочати подорож заново командою /start."
     )
 

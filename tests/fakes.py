@@ -118,7 +118,7 @@ class TelegramUser:
         self,
         application: Any,
         user_id: int,
-        username: str,
+        username: str | None,
         *,
         timestamp: int = 1_754_000_000,
     ) -> None:
@@ -133,6 +133,38 @@ class TelegramUser:
     async def send(self, text: str) -> None:
         await self.send_message(text=text)
 
+    def _new_message(self) -> dict[str, Any]:
+        self._next_update_id += 1
+        self._timestamp += 1
+        chat: dict[str, Any] = {
+            "id": self.user_id,
+            "type": "private",
+            "first_name": "Test",
+        }
+        sender: dict[str, Any] = {
+            "id": self.user_id,
+            "is_bot": False,
+            "first_name": "Test",
+        }
+        if self.username is not None:
+            chat["username"] = self.username
+            sender["username"] = self.username
+        return {
+            "message_id": self._next_update_id,
+            "date": self._timestamp,
+            "chat": chat,
+            "from": sender,
+        }
+
+    async def _process_message(self, message: dict[str, Any]) -> None:
+        update = Update.de_json(
+            {"update_id": self._next_update_id, "message": message},
+            self.application.bot,
+        )
+        self._last_update = update
+        self._last_message = message
+        await self.application.process_update(update)
+
     async def send_message(
         self,
         *,
@@ -143,24 +175,7 @@ class TelegramUser:
         if (text is None) == (document is None):
             raise ValueError("Supply exactly one supported content value")
 
-        self._next_update_id += 1
-        self._timestamp += 1
-        message: dict[str, Any] = {
-            "message_id": self._next_update_id,
-            "date": self._timestamp,
-            "chat": {
-                "id": self.user_id,
-                "type": "private",
-                "first_name": "Test",
-                "username": self.username,
-            },
-            "from": {
-                "id": self.user_id,
-                "is_bot": False,
-                "first_name": "Test",
-                "username": self.username,
-            },
-        }
+        message = self._new_message()
         if text is not None:
             message["text"] = text
             if text.startswith("/"):
@@ -174,13 +189,31 @@ class TelegramUser:
         if caption is not None:
             message["caption"] = caption
 
-        update = Update.de_json(
-            {"update_id": self._next_update_id, "message": message},
-            self.application.bot,
-        )
-        self._last_update = update
-        self._last_message = message
-        await self.application.process_update(update)
+        await self._process_message(message)
+
+    async def share_user(
+        self,
+        *,
+        request_id: int,
+        user_id: int,
+        first_name: str,
+        last_name: str | None = None,
+        username: str | None = None,
+    ) -> None:
+        shared_user: dict[str, Any] = {
+            "user_id": user_id,
+            "first_name": first_name,
+        }
+        if last_name is not None:
+            shared_user["last_name"] = last_name
+        if username is not None:
+            shared_user["username"] = username
+        message = self._new_message()
+        message["users_shared"] = {
+            "request_id": request_id,
+            "users": [shared_user],
+        }
+        await self._process_message(message)
 
     async def edit_last_message(self, text: str) -> None:
         if self._last_message is None or "text" not in self._last_message:

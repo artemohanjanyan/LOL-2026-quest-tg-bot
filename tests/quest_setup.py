@@ -8,8 +8,8 @@ BASE_TIME_MS = 1_754_000_000_000
 
 
 def seed_users(store: SQLiteQuestStore) -> None:
-    store.ensure_admin(ADMIN_ID, "organizer", BASE_TIME_MS)
-    store.add_captain(CAPTAIN_ID, "passepartout", BASE_TIME_MS)
+    store.ensure_admin(ADMIN_ID, "@organizer", BASE_TIME_MS)
+    store.add_captain(CAPTAIN_ID, "@passepartout", BASE_TIME_MS)
 
 
 def seed_ready_quest(store: SQLiteQuestStore) -> None:

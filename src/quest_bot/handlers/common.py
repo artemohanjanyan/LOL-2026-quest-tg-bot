@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
-from telegram import Message, Update
+from telegram import Message, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.ext import Application, BaseHandler, ContextTypes, ExtBot, JobQueue
 
 from quest_bot import messages
@@ -25,6 +25,7 @@ from quest_bot.service import QuestService, StagePresentation, StatusSnapshot
 
 LOGGER = logging.getLogger(__name__)
 _PENDING_CAPTAIN_RESET_KEY_PREFIX = "admin:pending-captain-reset:"
+_PENDING_CAPTAIN_ADD_KEY_PREFIX = "admin:pending-captain-add:"
 type ApplicationType = Application[
     ExtBot[int],
     ContextTypes.DEFAULT_TYPE,
@@ -132,8 +133,45 @@ def clear_pending_captain_reset(
     return value if isinstance(value, CaptainState) else None
 
 
-async def send_text(update: Update, deps: Dependencies, text: str) -> None:
-    await deps.delivery.send_part(chat_id(update), ContentPart(ContentType.TEXT, text))
+def remember_pending_captain_add(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    request_id: int,
+) -> None:
+    user_data(context)[f"{_PENDING_CAPTAIN_ADD_KEY_PREFIX}{chat_id(update)}"] = request_id
+
+
+def pending_captain_add(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int | None:
+    value = user_data(context).get(f"{_PENDING_CAPTAIN_ADD_KEY_PREFIX}{chat_id(update)}")
+    return value if type(value) is int else None
+
+
+def clear_pending_captain_add(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int | None:
+    value = user_data(context).pop(
+        f"{_PENDING_CAPTAIN_ADD_KEY_PREFIX}{chat_id(update)}",
+        None,
+    )
+    return value if type(value) is int else None
+
+
+async def send_text(
+    update: Update,
+    deps: Dependencies,
+    text: str,
+    *,
+    reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None = None,
+) -> None:
+    await deps.delivery.send_part(
+        chat_id(update),
+        ContentPart(ContentType.TEXT, text),
+        reply_markup=reply_markup,
+    )
 
 
 async def send_stage(update: Update, deps: Dependencies, presentation: StagePresentation) -> None:

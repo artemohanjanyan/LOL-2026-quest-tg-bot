@@ -2,7 +2,7 @@
 
 from functools import partial
 
-from telegram import Update
+from telegram import ReplyKeyboardRemove, Update
 from telegram.ext import CommandHandler, ContextTypes
 
 from quest_bot import messages
@@ -11,6 +11,7 @@ from quest_bot.handlers.common import (
     HandlerType,
     actor_id,
     chat_id,
+    clear_pending_captain_add,
     clear_pending_captain_reset,
     event_at_ms,
     parse_numbered_text,
@@ -257,11 +258,17 @@ async def cancel(
     deps.service.require_user(actor_id(update))
     if clear_pending_captain_reset(update, context) is not None:
         text = messages.RESET_CANCELLED
+        reply_markup = None
+    elif clear_pending_captain_add(update, context) is not None:
+        text = messages.CAPTAIN_PICKER_CANCELLED
+        reply_markup = ReplyKeyboardRemove()
     elif _clear_pending_skip(update, context):
         text = messages.SKIP_CANCELLED
+        reply_markup = None
     else:
         text = messages.NOTHING_TO_CANCEL
-    await send_text(update, deps, text)
+        reply_markup = None
+    await send_text(update, deps, text, reply_markup=reply_markup)
 
 
 def build_handlers(

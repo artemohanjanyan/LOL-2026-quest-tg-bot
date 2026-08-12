@@ -36,7 +36,9 @@ API URLs are not logged, which keeps the bot token out of these records.
 ## Content and roles
 
 Users are authorized by stable Telegram user ID. Administrators can use captain
-commands and may enroll or deactivate captains without deleting their history.
+commands and enroll captains through Telegram's native user picker without
+copying IDs. All administrators retain `/add_captain_by_id` as a manual fallback.
+Deactivating a captain does not delete their history.
 Only the owner administrator configured through `QUEST_ADMIN_ID` may add other
 administrators. Run `/help` for the role-specific command list.
 
@@ -71,11 +73,12 @@ Create `.env`:
 TOKEN=1111111111:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 QUEST_DB_PATH=quest.db
 QUEST_ADMIN_ID=123456789
-QUEST_ADMIN_USERNAME=organizer
+QUEST_ADMIN_DISPLAY_NAME=@organizer
 ```
 
 `QUEST_ADMIN_ID` is only a bootstrap: startup ensures that Telegram ID is an
-active administrator. It may be omitted after the first successful start.
+active administrator under the presentation-ready name in
+`QUEST_ADMIN_DISPLAY_NAME`. It may be omitted after the first successful start.
 
 Run the bot and checks:
 

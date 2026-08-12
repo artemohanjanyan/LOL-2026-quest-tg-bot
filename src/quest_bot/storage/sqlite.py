@@ -246,21 +246,21 @@ class SQLiteQuestStore:
 
     # Users
 
-    def ensure_admin(self, user_id: int, username: str, now_ms: int) -> User:
-        return self._upsert_user(user_id, username, UserRole.ADMIN, now_ms)
+    def ensure_admin(self, user_id: int, display_name: str, now_ms: int) -> User:
+        return self._upsert_user(user_id, display_name, UserRole.ADMIN, now_ms)
 
-    def add_captain(self, user_id: int, username: str, now_ms: int) -> User:
-        if not username.strip():
-            raise ValueError("username must not be empty")
+    def add_captain(self, user_id: int, display_name: str, now_ms: int) -> User:
+        if not display_name.strip():
+            raise ValueError("display name must not be empty")
         with self._transaction() as connection:
             row = self._require_row(
                 connection.execute(
                     """
                 INSERT INTO users (
-                    user_id, username, role, active, updated_at_ms
+                    user_id, display_name, role, active, updated_at_ms
                 ) VALUES (?, ?, 'captain', 1, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    username = excluded.username,
+                    display_name = excluded.display_name,
                     role = CASE
                         WHEN users.role = 'admin' THEN 'admin'
                         ELSE 'captain'
@@ -269,31 +269,37 @@ class SQLiteQuestStore:
                     updated_at_ms = excluded.updated_at_ms
                 RETURNING *
                 """,
-                    (user_id, username, now_ms),
+                    (user_id, display_name, now_ms),
                 ).fetchone(),
                 "user",
             )
             self._ensure_captain_state_in_transaction(connection, user_id)
         return self._user_from_row(row)
 
-    def _upsert_user(self, user_id: int, username: str, role: UserRole, now_ms: int) -> User:
-        if not username.strip():
-            raise ValueError("username must not be empty")
+    def _upsert_user(
+        self,
+        user_id: int,
+        display_name: str,
+        role: UserRole,
+        now_ms: int,
+    ) -> User:
+        if not display_name.strip():
+            raise ValueError("display name must not be empty")
         with self._transaction() as connection:
             row = self._require_row(
                 connection.execute(
                     """
                 INSERT INTO users (
-                    user_id, username, role, active, updated_at_ms
+                    user_id, display_name, role, active, updated_at_ms
                 ) VALUES (?, ?, ?, 1, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
-                    username = excluded.username,
+                    display_name = excluded.display_name,
                     role = excluded.role,
                     active = 1,
                     updated_at_ms = excluded.updated_at_ms
                 RETURNING *
                 """,
-                    (user_id, username, role.value, now_ms),
+                    (user_id, display_name, role.value, now_ms),
                 ).fetchone(),
                 "user",
             )
@@ -320,19 +326,18 @@ class SQLiteQuestStore:
         )
         return None if row is None else self._user_from_row(row)
 
-    def get_user_by_username(self, username: str) -> User | None:
-        normalized_username = username.removeprefix("@")
+    def get_user_by_display_name(self, display_name: str) -> User | None:
         row = (
             self._connection_or_raise()
             .execute(
                 """
             SELECT *
             FROM users
-            WHERE username = ? COLLATE NOCASE
+            WHERE display_name = ? COLLATE NOCASE
             ORDER BY active DESC, updated_at_ms DESC, user_id
             LIMIT 1
             """,
-                (normalized_username,),
+                (display_name,),
             )
             .fetchone()
         )
@@ -342,7 +347,7 @@ class SQLiteQuestStore:
         sql = "SELECT * FROM users"
         if not include_inactive:
             sql += " WHERE active = 1"
-        sql += " ORDER BY role, username COLLATE NOCASE, user_id"
+        sql += " ORDER BY role, display_name COLLATE NOCASE, user_id"
         rows = self._connection_or_raise().execute(sql).fetchall()
         return tuple(self._user_from_row(row) for row in rows)
 
@@ -1024,7 +1029,7 @@ class SQLiteQuestStore:
             JOIN captain_state USING (user_id)
             LEFT JOIN totals USING (user_id)
             WHERE users.role = 'captain' AND users.active = 1
-            ORDER BY users.username COLLATE NOCASE, users.user_id
+            ORDER BY users.display_name COLLATE NOCASE, users.user_id
             """
         )
         return tuple(
@@ -1085,7 +1090,7 @@ class SQLiteQuestStore:
     def _user_from_row(row: sqlite3.Row) -> User:
         return User(
             user_id=int(row["user_id"]),
-            username=str(row["username"]),
+            display_name=str(row["display_name"]),
             role=UserRole(str(row["role"])),
             active=bool(row["active"]),
         )

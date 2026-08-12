@@ -43,7 +43,7 @@ class BotHarness:
     store: SQLiteQuestStore
     clock: MutableClock
 
-    def user(self, user_id: int, username: str) -> TelegramUser:
+    def user(self, user_id: int, username: str | None) -> TelegramUser:
         return TelegramUser(
             self.application,
             user_id,
@@ -67,7 +67,7 @@ async def bot_harness(
             token="999001:test-token",
             database_path=tmp_path / "quest.db",
             bootstrap_admin_id=ADMIN_ID,
-            bootstrap_admin_username="organizer",
+            bootstrap_admin_display_name="@organizer",
             sweep_interval_seconds=15,
         ),
         service,
@@ -124,6 +124,18 @@ async def test_unknown_commands_and_messages_receive_guidance(
         messages.UNKNOWN_COMMAND,
         messages.UNKNOWN_MESSAGE,
     ]
+
+
+@pytest.mark.asyncio
+async def test_unknown_user_cannot_register_by_contacting_bot(
+    bot_harness: BotHarness,
+) -> None:
+    stranger = bot_harness.user(404, "stranger")
+
+    await stranger.send("/start")
+
+    assert bot_harness.telegram.messages_to(404) == [messages.UNKNOWN_USER]
+    assert bot_harness.store.get_user(404) is None
 
 
 @pytest.mark.asyncio
@@ -351,23 +363,101 @@ async def test_captain_cannot_use_admin_content_command(
 
 
 @pytest.mark.asyncio
-async def test_add_captain_reuses_existing_username_when_omitted(
+async def test_add_captain_picker_registers_selected_user_without_username(
     bot_harness: BotHarness,
 ) -> None:
     admin = bot_harness.user(ADMIN_ID, "organizer")
-    await admin.send(f"/remove_captain {CAPTAIN_ID}")
-    bot_harness.telegram.clear()
+    await admin.send("/add_captain")
 
-    await admin.send(f"/add_captain {CAPTAIN_ID}")
-    await admin.send(f"/add_captain {OTHER_CAPTAIN_ID}")
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [messages.CAPTAIN_PICKER_PROMPT]
+    assert bot_harness.store.get_user(OTHER_CAPTAIN_ID) is None
+    method, parameters = bot_harness.telegram.calls_to(ADMIN_ID)[-1]
+    assert method == "sendMessage"
+    button = parameters["reply_markup"]["keyboard"][0][0]
+    assert button == {
+        "text": messages.CAPTAIN_PICKER_BUTTON,
+        "request_users": {
+            "request_id": ADMIN_ID * 1_000 + 1,
+            "user_is_bot": False,
+            "max_quantity": 1,
+            "request_name": True,
+            "request_username": True,
+        },
+    }
+
+    await admin.share_user(
+        request_id=ADMIN_ID * 1_000 + 1,
+        user_id=OTHER_CAPTAIN_ID,
+        first_name="Phileas",
+        last_name="Fogg",
+    )
 
     assert bot_harness.telegram.messages_to(ADMIN_ID) == [
-        messages.captain_added("passepartout", CAPTAIN_ID),
-        messages.USAGE_ADD_CAPTAIN,
+        messages.CAPTAIN_PICKER_PROMPT,
+        messages.captain_added("Phileas Fogg", OTHER_CAPTAIN_ID),
+    ]
+    captain = bot_harness.store.get_user(OTHER_CAPTAIN_ID)
+    assert captain is not None
+    assert captain.display_name == "Phileas Fogg"
+    assert captain.active
+
+    bot_harness.telegram.clear()
+    await bot_harness.user(OTHER_CAPTAIN_ID, None).send("/start")
+    assert bot_harness.telegram.messages_to(OTHER_CAPTAIN_ID)[0] == messages.quest_started(
+        limit_minutes=80
+    )
+
+
+@pytest.mark.asyncio
+async def test_captain_picker_prefers_username_and_can_be_cancelled(
+    bot_harness: BotHarness,
+) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    await admin.send("/add_captain")
+    await admin.share_user(
+        request_id=ADMIN_ID * 1_000 + 1,
+        user_id=OTHER_CAPTAIN_ID,
+        first_name="Phileas",
+        last_name="Fogg",
+        username="world_traveller",
+    )
+    added = bot_harness.store.get_user(OTHER_CAPTAIN_ID)
+    assert added is not None
+    assert added.display_name == "@world_traveller"
+
+    await admin.send("/add_captain")
+    await admin.send("/cancel")
+    await admin.share_user(
+        request_id=ADMIN_ID * 1_000 + 3,
+        user_id=404,
+        first_name="Stale",
+    )
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID)[-2:] == [
+        messages.CAPTAIN_PICKER_CANCELLED,
+        messages.CAPTAIN_PICKER_STALE,
+    ]
+    assert bot_harness.store.get_user(404) is None
+
+
+@pytest.mark.asyncio
+async def test_admin_can_add_captain_by_id_and_reuse_display_name(
+    bot_harness: BotHarness,
+) -> None:
+    owner = bot_harness.user(ADMIN_ID, "organizer")
+    await owner.send(f"/remove_captain {CAPTAIN_ID}")
+    bot_harness.telegram.clear()
+
+    await owner.send(f"/add_captain_by_id {CAPTAIN_ID}")
+    await owner.send(f"/add_captain_by_id {OTHER_CAPTAIN_ID}")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        messages.captain_added("@passepartout", CAPTAIN_ID),
+        messages.USAGE_ADD_CAPTAIN_BY_ID,
     ]
     captain = bot_harness.store.get_user(CAPTAIN_ID)
     assert captain is not None
-    assert captain.username == "passepartout"
+    assert captain.display_name == "@passepartout"
     assert captain.active
     assert bot_harness.store.get_user(OTHER_CAPTAIN_ID) is None
 
@@ -380,11 +470,12 @@ async def test_only_owner_admin_can_add_admin_or_see_command(
     await owner.send("/help")
     owner_help = bot_harness.telegram.messages_to(ADMIN_ID)[-1]
     assert "/add_admin" in owner_help
+    assert "/add_captain_by_id" in owner_help
     assert "/confirm_next_stage" not in owner_help
     assert "/confirm_reset_captain" not in owner_help
     assert "/cancel" not in owner_help
 
-    await owner.send(f"/add_admin {OTHER_CAPTAIN_ID} stationmaster")
+    await owner.send(f"/add_admin {OTHER_CAPTAIN_ID} @stationmaster")
     added = bot_harness.store.get_user(OTHER_CAPTAIN_ID)
     assert added is not None
     assert added.role.value == "admin"
@@ -393,11 +484,17 @@ async def test_only_owner_admin_can_add_admin_or_see_command(
     regular_admin = bot_harness.user(OTHER_CAPTAIN_ID, "stationmaster")
     await regular_admin.send("/help")
     await regular_admin.send("/add_admin 404 conductor")
+    await regular_admin.send("/add_captain_by_id 405 @engineer")
 
     regular_messages = bot_harness.telegram.messages_to(OTHER_CAPTAIN_ID)
     assert "/add_admin" not in regular_messages[0]
+    assert "/add_captain_by_id" in regular_messages[0]
     assert regular_messages[1] == messages.PERMISSION_DENIED
+    assert regular_messages[2] == messages.captain_added("@engineer", 405)
     assert bot_harness.store.get_user(404) is None
+    added_captain = bot_harness.store.get_user(405)
+    assert added_captain is not None
+    assert added_captain.role.value == "captain"
 
 
 @pytest.mark.asyncio
@@ -415,7 +512,7 @@ async def test_reset_captain_requires_confirmation_and_can_be_cancelled(
     await admin.send("/reset_captain passepartout")
 
     assert bot_harness.telegram.messages_to(ADMIN_ID) == [
-        messages.captain_reset_warning("passepartout", CAPTAIN_ID)
+        messages.captain_reset_warning("@passepartout", CAPTAIN_ID)
     ]
     assert bot_harness.store.get_captain_state(CAPTAIN_ID).position is CaptainPosition.STAGE
     assert bot_harness.store.get_attempt_counts(CAPTAIN_ID, 1) == ((1, 1),)
@@ -434,7 +531,7 @@ async def test_reset_captain_requires_confirmation_and_can_be_cancelled(
     await admin.send("/confirm_reset_captain")
 
     assert bot_harness.telegram.messages_to(ADMIN_ID)[-1] == messages.captain_reset(
-        "passepartout", CAPTAIN_ID
+        "@passepartout", CAPTAIN_ID
     )
     state = bot_harness.store.get_captain_state(CAPTAIN_ID)
     assert state.position is CaptainPosition.NOT_STARTED
@@ -466,8 +563,8 @@ async def test_reset_captain_accepts_admin_role_target(bot_harness: BotHarness) 
     await admin.send("/confirm_reset_captain")
 
     assert bot_harness.telegram.messages_to(ADMIN_ID) == [
-        messages.captain_reset_warning("organizer", ADMIN_ID),
-        messages.captain_reset("organizer", ADMIN_ID),
+        messages.captain_reset_warning("@organizer", ADMIN_ID),
+        messages.captain_reset("@organizer", ADMIN_ID),
     ]
     user = bot_harness.store.get_user(ADMIN_ID)
     assert user is not None
@@ -678,7 +775,7 @@ async def test_commands_work_after_deadline_until_sweep_claims_timeout(
     admin = bot_harness.user(ADMIN_ID, "organizer")
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
     await admin.send("/set_time_limit 1")
-    await admin.send(f"/add_captain {OTHER_CAPTAIN_ID} fix")
+    await admin.send(f"/add_captain_by_id {OTHER_CAPTAIN_ID} @fix")
     other_captain = bot_harness.user(OTHER_CAPTAIN_ID, "fix")
     await captain.send("/start")
     await captain.send("/next_stage")
@@ -721,12 +818,12 @@ async def test_commands_work_after_deadline_until_sweep_claims_timeout(
 
 
 @pytest.mark.asyncio
-async def test_leaderboard_orders_by_score_then_username(
+async def test_leaderboard_orders_by_score_then_display_name(
     bot_harness: BotHarness,
 ) -> None:
     admin = bot_harness.user(ADMIN_ID, "organizer")
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
-    await admin.send(f"/add_captain {OTHER_CAPTAIN_ID} aardvark")
+    await admin.send(f"/add_captain_by_id {OTHER_CAPTAIN_ID} @aardvark")
     bot_harness.telegram.clear()
 
     await admin.send("/leaderboard")

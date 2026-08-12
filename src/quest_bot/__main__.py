@@ -28,7 +28,7 @@ def main() -> None:
         if settings.bootstrap_admin_id is not None:
             store.ensure_admin(
                 settings.bootstrap_admin_id,
-                settings.bootstrap_admin_username.lstrip("@"),
+                settings.bootstrap_admin_display_name,
                 utc_now_ms(),
             )
         service = QuestService(store, owner_admin_id=settings.bootstrap_admin_id)

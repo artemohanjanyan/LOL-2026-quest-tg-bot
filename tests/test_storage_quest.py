@@ -1,5 +1,6 @@
 import sqlite3
 from collections.abc import Iterator
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,42 @@ def start_and_enter_first_stage(store: SQLiteQuestStore) -> None:
         source_update_id=CAPTAIN_ID * 100 + 2,
     )
     assert entered.position is CaptainPosition.STAGE
+
+
+def test_v1_usernames_migrate_to_presentation_ready_display_names(tmp_path: Path) -> None:
+    database = tmp_path / "quest.db"
+    migration_root = resources.files("quest_bot.storage.migrations")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY CHECK (version > 0),
+                name TEXT NOT NULL UNIQUE,
+                applied_at_ms INTEGER NOT NULL CHECK (applied_at_ms >= 0)
+            ) STRICT
+            """
+        )
+        connection.executescript(
+            migration_root.joinpath("001_initial.sql").read_text(encoding="utf-8")
+        )
+        connection.execute("INSERT INTO schema_migrations VALUES (1, '001_initial.sql', 0)")
+        connection.execute(
+            "INSERT INTO users VALUES (?, ?, 'captain', 1, ?)",
+            (CAPTAIN_ID, "passepartout", BASE_TIME_MS),
+        )
+
+    with SQLiteQuestStore.open(database, lock_instance=False) as migrated:
+        assert migrated.schema_version == 2
+        captain = migrated.get_user(CAPTAIN_ID)
+        assert captain is not None
+        assert captain.display_name == "@passepartout"
+
+    with sqlite3.connect(database) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list(users)")}
+    assert "display_name" in columns
+    assert "username" not in columns
+    assert "users_display_name_nocase_idx" in indexes
 
 
 def test_transition_history_preserves_metadata_and_update_idempotency(

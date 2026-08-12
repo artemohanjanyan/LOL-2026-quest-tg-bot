@@ -368,20 +368,25 @@ class QuestService:
 
     # Administration --------------------------------------------------------
 
-    def add_admin(self, actor_id: int, user_id: int, username: str) -> User:
+    def add_admin(self, actor_id: int, user_id: int, display_name: str) -> User:
         self.require_owner_admin(actor_id)
-        self._validate_identity(user_id, username)
-        return self.store.ensure_admin(user_id, username.lstrip("@"), self._clock())
+        self._validate_identity(user_id, display_name)
+        return self.store.ensure_admin(user_id, display_name.strip(), self._clock())
 
-    def add_captain(self, actor_id: int, user_id: int, username: str | None = None) -> User:
+    def add_captain(
+        self,
+        actor_id: int,
+        user_id: int,
+        display_name: str | None = None,
+    ) -> User:
         self.require_admin(actor_id)
-        if username is None:
+        if display_name is None:
             existing = self.store.get_user(user_id)
             if existing is None:
-                raise ContentValidationError("username required for new captain")
-            username = existing.username
-        self._validate_identity(user_id, username)
-        return self.store.add_captain(user_id, username.lstrip("@"), self._clock())
+                raise ContentValidationError("display name required for new captain")
+            display_name = existing.display_name
+        self._validate_identity(user_id, display_name)
+        return self.store.add_captain(user_id, display_name.strip(), self._clock())
 
     def remove_captain(self, actor_id: int, user_id: int) -> bool:
         self.require_admin(actor_id)
@@ -528,7 +533,7 @@ class QuestService:
                 summaries,
                 key=lambda item: (
                     -item.total_score,
-                    item.user.username.casefold(),
+                    item.user.display_name.casefold(),
                 ),
             )
         )
@@ -556,10 +561,12 @@ class QuestService:
         )
 
     def resolve_user(self, reference: str) -> User:
-        cleaned = reference.strip().lstrip("@")
+        cleaned = reference.strip()
         user = self.store.get_user(int(cleaned)) if cleaned.isdecimal() else None
         if user is None and cleaned:
-            user = self.store.get_user_by_username(cleaned)
+            user = self.store.get_user_by_display_name(cleaned)
+        if user is None and cleaned and not cleaned.startswith("@"):
+            user = self.store.get_user_by_display_name(f"@{cleaned}")
         if user is None:
             raise NotFound("captain")
         return user
@@ -624,6 +631,6 @@ class QuestService:
             raise ContentValidationError("content must have at least one part")
 
     @staticmethod
-    def _validate_identity(user_id: int, username: str) -> None:
-        if user_id <= 0 or not username.strip().lstrip("@"):
+    def _validate_identity(user_id: int, display_name: str) -> None:
+        if user_id <= 0 or not display_name.strip().lstrip("@"):
             raise ContentValidationError("invalid captain")

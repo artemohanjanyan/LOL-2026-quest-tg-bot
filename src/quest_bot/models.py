@@ -48,7 +48,7 @@ def utc_now_ms() -> int:
 @dataclass(frozen=True, slots=True)
 class User:
     user_id: int
-    username: str
+    display_name: str
     role: UserRole
     active: bool
 

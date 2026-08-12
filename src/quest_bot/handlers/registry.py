@@ -54,6 +54,7 @@ def register_handlers(
 ) -> None:
     application.add_handler(TypeHandler(Update, log_update), group=-1)
     application.add_handler(MessageHandler(filters.UpdateType.EDITED, ignore_edited_message))
+    application.add_handler(users.build_captain_picker_handler(deps))
     # The content conversation comes first so /done and /cancel are routed back
     # to the active per-user, per-chat draft before ordinary command handlers.
     modules = (content, users, operations, reports, captain)
