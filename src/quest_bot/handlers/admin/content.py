@@ -30,6 +30,7 @@ from quest_bot.handlers.common import (
     user_data,
 )
 from quest_bot.models import ContentPart, OutroKind
+from quest_bot.normalization import normalize_answer
 
 DRAFT_CONTENT = 1
 DRAFT_KEY_PREFIX = "quest_content_draft:"
@@ -49,7 +50,7 @@ class ContentDraft:
     stage_number: int | None = None
     task_number: int | None = None
     task_name: str | None = None
-    correct_answer: str | None = None
+    correct_answers: list[str] = field(default_factory=list)
     parts: list[ContentPart] = field(default_factory=list)
 
 
@@ -119,8 +120,8 @@ async def begin_task(
     await send_text(
         update,
         deps,
-        messages.DRAFT_READY
-        + "\nДодайте промпт завдання та задайте відповідь командою /correct_answer.",
+        messages.DRAFT_READY + "\nДодайте промпт завдання та щонайменше один варіант відповіді "
+        "командою /correct_answer. Повторіть команду для інших варіантів.",
     )
     return DRAFT_CONTENT
 
@@ -161,12 +162,16 @@ async def correct_answer(
     if draft is None or draft.kind is not DraftKind.TASK:
         await send_text(update, deps, messages.NO_ACTIVE_DRAFT)
         return DRAFT_CONTENT
-    answer = " ".join(command_args(context))
-    if not answer.strip():
+    answer = " ".join(command_args(context)).strip()
+    if not answer:
         await send_text(update, deps, messages.USAGE_CORRECT_ANSWER)
         return DRAFT_CONTENT
-    draft.correct_answer = answer
-    await send_text(update, deps, messages.CORRECT_ANSWER_SAVED)
+    normalized = normalize_answer(answer)
+    if any(normalize_answer(saved) == normalized for saved in draft.correct_answers):
+        await send_text(update, deps, messages.CORRECT_ANSWER_DUPLICATE)
+        return DRAFT_CONTENT
+    draft.correct_answers.append(answer)
+    await send_text(update, deps, messages.correct_answer_saved(len(draft.correct_answers)))
     return DRAFT_CONTENT
 
 
@@ -193,11 +198,12 @@ async def done(
         elif draft.kind is DraftKind.TIMEOUT_OUTRO:
             deps.service.replace_outro(admin_id, OutroKind.TIMEOUT, draft.parts)
         elif draft.kind is DraftKind.TASK:
-            if draft.correct_answer is None:
+            if not draft.correct_answers:
                 await send_text(
                     update,
                     deps,
-                    "Спершу задайте правильну відповідь командою /correct_answer.",
+                    "Спершу додайте хоча б один варіант правильної відповіді "
+                    "командою /correct_answer.",
                 )
                 return DRAFT_CONTENT
             assert draft.stage_number is not None
@@ -206,7 +212,7 @@ async def done(
                 admin_id,
                 draft.stage_number,
                 draft.task_number,
-                draft.correct_answer,
+                draft.correct_answers,
                 draft.parts,
                 name=draft.task_name,
             )
@@ -340,7 +346,8 @@ async def show_stage(
         await send_text(
             update,
             deps,
-            f"Правильна відповідь до завдання {task.task_number}: {task.correct_answer_raw}",
+            f"Правильні відповіді до завдання {task.task_number}:\n"
+            + _numbered_answers(task.correct_answers),
         )
 
 
@@ -361,9 +368,13 @@ async def show_task(
         update,
         deps,
         f"Етап {stage_number}, завдання {task_number}{rendered_name}.\n"
-        f"Правильна відповідь: {task.correct_answer_raw}",
+        f"Правильні відповіді:\n{_numbered_answers(task.correct_answers)}",
     )
     await deps.delivery.send_parts(chat_id(update), task.prompt_parts)
+
+
+def _numbered_answers(answers: tuple[str, ...]) -> str:
+    return "\n".join(f"{number}. {answer}" for number, answer in enumerate(answers, start=1))
 
 
 async def show_global_content(

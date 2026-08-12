@@ -252,11 +252,59 @@ async def test_answers_and_live_configuration_recalculate_visible_score(
     replacement = bot_harness.store.get_task(1, 1)
     assert replacement is not None
     assert replacement.name == "Нове парі"
+    assert replacement.correct_answers == ("81",)
     await captain.send("/status")
 
     recalculated = bot_harness.telegram.messages_to(CAPTAIN_ID)[-1]
     assert "Бали: 12" in recalculated
     assert "Завдання: 1 із 2 розв’язано" in recalculated
+
+
+@pytest.mark.asyncio
+async def test_admin_publishes_multiple_answers_and_captain_can_use_any_variant(
+    bot_harness: BotHarness,
+) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+
+    await admin.send("/set_task 1 1 Навколо світу")
+    await admin.send("Replacement prompt")
+    await admin.send("/correct_answer 80")
+    await admin.send("/correct_answer ８０")
+    await admin.send("/correct_answer eighty days")
+
+    admin_messages = bot_harness.telegram.messages_to(ADMIN_ID)
+    assert admin_messages[-3:] == [
+        messages.correct_answer_saved(1),
+        messages.CORRECT_ANSWER_DUPLICATE,
+        messages.correct_answer_saved(2),
+    ]
+
+    await admin.send("/done")
+    task = bot_harness.store.get_task(1, 1)
+    assert task is not None
+    assert task.correct_answers == ("80", "eighty days")
+
+    bot_harness.telegram.clear()
+    await admin.send("/show_task 1 1")
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [
+        "Етап 1, завдання 1 — Навколо світу.\nПравильні відповіді:\n1. 80\n2. eighty days",
+        "Replacement prompt",
+    ]
+
+    bot_harness.telegram.clear()
+    await admin.send("/show_stage 1")
+    assert (
+        "Правильні відповіді до завдання 1:\n1. 80\n2. eighty days"
+        in bot_harness.telegram.messages_to(ADMIN_ID)
+    )
+
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    bot_harness.telegram.clear()
+    await captain.send("/answer 1 EIGHTY DAYS")
+
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.answer_correct(points=10)]
 
 
 @pytest.mark.asyncio

@@ -78,7 +78,7 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 /set_time_limit <хвилини> — налаштувати тривалість подорожі
 
 Робота з чернеткою:
-/correct_answer <відповідь> — задати правильну відповідь
+/correct_answer <відповідь> — додати варіант правильної відповіді
 /done — опублікувати чернетку"""
 
 OWNER_ADMIN_HELP = f"""{ADMIN_HELP}
@@ -292,7 +292,13 @@ DRAFT_READY = (
 DRAFT_CANCELLED = "Чернетку скасовано; опублікований маршрут не змінився."
 DRAFT_PUBLISHED = "Чернетку опубліковано. Мапу експедиції оновлено."
 NO_ACTIVE_DRAFT = "Немає відкритої чернетки."
-CORRECT_ANSWER_SAVED = "Правильну відповідь додано до чернетки завдання."
+CORRECT_ANSWER_DUPLICATE = "Такий варіант правильної відповіді вже є в чернетці після нормалізації."
+
+
+def correct_answer_saved(answer_number: int) -> str:
+    return f"Варіант правильної відповіді №{answer_number} додано до чернетки завдання."
+
+
 CONTENT_PART_ADDED = "Частину додано до чернетки."
 CONTENT_DELETED = "Вміст видалено з поточної мапи."
 STAGE_NOT_FOUND = "Етап із таким номером не знайдено."

@@ -475,12 +475,17 @@ class SQLiteQuestStore:
         self,
         stage_number: int,
         task_number: int,
-        correct_answer: str,
+        correct_answers: Sequence[str],
         prompt_parts: Sequence[ContentPart],
         *,
         name: str | None = None,
     ) -> Task:
-        normalized_answer = normalize_answer(correct_answer)
+        answers = tuple(answer.strip() for answer in correct_answers)
+        normalized_answers = tuple(normalize_answer(answer) for answer in answers)
+        if not answers or any(not answer for answer in answers):
+            raise ValueError("task must have at least one non-empty correct answer")
+        if len(set(normalized_answers)) != len(normalized_answers):
+            raise ValueError("task correct answers must be unique after normalization")
         normalized_name = name.strip() or None if name is not None else None
         parts = tuple(prompt_parts)
         if not parts:
@@ -511,25 +516,36 @@ class SQLiteQuestStore:
             task_row = self._require_row(
                 connection.execute(
                     """
-                INSERT INTO tasks (
-                    stage_number, task_number, name,
-                    correct_answer_raw, correct_answer_normalized
-                ) VALUES (?, ?, ?, ?, ?)
+                INSERT INTO tasks (stage_number, task_number, name)
+                VALUES (?, ?, ?)
                 ON CONFLICT(stage_number, task_number) DO UPDATE SET
-                    name = excluded.name,
-                    correct_answer_raw = excluded.correct_answer_raw,
-                    correct_answer_normalized = excluded.correct_answer_normalized
+                    name = excluded.name
                 RETURNING *
                     """,
-                    (
-                        stage_number,
-                        task_number,
-                        normalized_name,
-                        correct_answer,
-                        normalized_answer,
-                    ),
+                    (stage_number, task_number, normalized_name),
                 ).fetchone(),
                 "task",
+            )
+            connection.execute(
+                """
+                DELETE FROM task_correct_answers
+                WHERE stage_number = ? AND task_number = ?
+                """,
+                (stage_number, task_number),
+            )
+            connection.executemany(
+                """
+                INSERT INTO task_correct_answers (
+                    stage_number, task_number, answer_number,
+                    raw_answer, normalized_answer
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    (stage_number, task_number, number, raw, normalized)
+                    for number, (raw, normalized) in enumerate(
+                        zip(answers, normalized_answers, strict=True), start=1
+                    )
+                ),
             )
             connection.execute(
                 """
@@ -557,7 +573,7 @@ class SQLiteQuestStore:
                     for part_number, part in enumerate(parts, start=1)
                 ),
             )
-        return self._task_from_row(task_row, parts)
+        return self._task_from_row(task_row, answers, parts)
 
     def get_task(self, stage_number: int, task_number: int) -> Task | None:
         tasks = self._read_tasks(stage_number, task_number)
@@ -586,9 +602,24 @@ class SQLiteQuestStore:
         for row in rows:
             key = (int(row["stage_number"]), int(row["task_number"]))
             grouped.setdefault(key, []).append(row)
+        answer_rows = self._connection_or_raise().execute(
+            f"""
+            SELECT task_correct_answers.*
+            FROM task_correct_answers
+            JOIN tasks USING (stage_number, task_number)
+            WHERE tasks.stage_number = ? {task_filter}
+            ORDER BY tasks.task_number, task_correct_answers.answer_number
+            """,
+            parameters,
+        )
+        answers: dict[tuple[int, int], list[str]] = {}
+        for row in answer_rows:
+            key = (int(row["stage_number"]), int(row["task_number"]))
+            answers.setdefault(key, []).append(str(row["raw_answer"]))
         return tuple(
             self._task_from_row(
                 task_rows[0],
+                tuple(answers[key]),
                 tuple(
                     ContentPart(
                         ContentType(str(row["prompt_content_type"])),
@@ -598,7 +629,7 @@ class SQLiteQuestStore:
                     for row in task_rows
                 ),
             )
-            for task_rows in grouped.values()
+            for key, task_rows in grouped.items()
         )
 
     def delete_task(self, stage_number: int, task_number: int) -> bool:
@@ -868,33 +899,39 @@ class SQLiteQuestStore:
                 raise StateConflictError("captain is not in the requested stage")
             task_row = connection.execute(
                 """
-                SELECT * FROM tasks
+                SELECT 1 FROM tasks
                 WHERE stage_number = ? AND task_number = ?
                 """,
                 (stage_number, task_number),
             ).fetchone()
             if task_row is None:
                 raise RecordNotFoundError(f"task {stage_number}.{task_number} does not exist")
-            correct_answer = str(task_row["correct_answer_normalized"])
             if duplicate_row is not None:
+                duplicate_correct = connection.execute(
+                    """
+                    SELECT 1 FROM task_correct_answers
+                    WHERE stage_number = ? AND task_number = ?
+                      AND normalized_answer = ?
+                    """,
+                    (
+                        stage_number,
+                        task_number,
+                        str(duplicate_row["normalized_answer"]),
+                    ),
+                ).fetchone()
                 return RecordedAttempt(
                     int(duplicate_row["attempt_number"]),
-                    str(duplicate_row["normalized_answer"]) == correct_answer,
+                    duplicate_correct is not None,
                 )
             solved = connection.execute(
                 """
                 SELECT 1
                 FROM task_attempts
+                JOIN task_correct_answers USING (stage_number, task_number, normalized_answer)
                 WHERE user_id = ? AND stage_number = ? AND task_number = ?
-                  AND normalized_answer = ?
                 LIMIT 1
                 """,
-                (
-                    user_id,
-                    stage_number,
-                    task_number,
-                    correct_answer,
-                ),
+                (user_id, stage_number, task_number),
             ).fetchone()
             if solved is not None:
                 raise TaskAlreadySolvedError(f"task {stage_number}.{task_number} is already solved")
@@ -945,7 +982,15 @@ class SQLiteQuestStore:
             )
             return RecordedAttempt(
                 int(row["attempt_number"]),
-                str(row["normalized_answer"]) == correct_answer,
+                connection.execute(
+                    """
+                    SELECT 1 FROM task_correct_answers
+                    WHERE stage_number = ? AND task_number = ?
+                      AND normalized_answer = ?
+                    """,
+                    (stage_number, task_number, str(row["normalized_answer"])),
+                ).fetchone()
+                is not None,
             )
 
     def get_attempt_counts(
@@ -1121,12 +1166,16 @@ class SQLiteQuestStore:
         )
 
     @staticmethod
-    def _task_from_row(row: sqlite3.Row, prompt_parts: tuple[ContentPart, ...]) -> Task:
+    def _task_from_row(
+        row: sqlite3.Row,
+        correct_answers: tuple[str, ...],
+        prompt_parts: tuple[ContentPart, ...],
+    ) -> Task:
         return Task(
             stage_number=int(row["stage_number"]),
             task_number=int(row["task_number"]),
             name=None if row["name"] is None else str(row["name"]),
-            correct_answer_raw=str(row["correct_answer_raw"]),
+            correct_answers=correct_answers,
             prompt_parts=prompt_parts,
         )
 

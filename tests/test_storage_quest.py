@@ -52,7 +52,7 @@ def start_and_enter_first_stage(store: SQLiteQuestStore) -> None:
     assert entered.position is CaptainPosition.STAGE
 
 
-def test_v1_database_migrates_usernames_and_adds_optional_task_names(tmp_path: Path) -> None:
+def test_v1_database_migrates_users_task_names_and_correct_answers(tmp_path: Path) -> None:
     database = tmp_path / "quest.db"
     migration_root = resources.files("quest_bot.storage.migrations")
     with sqlite3.connect(database) as connection:
@@ -76,15 +76,29 @@ def test_v1_database_migrates_usernames_and_adds_optional_task_names(tmp_path: P
         connection.execute("INSERT INTO stages VALUES (1, 'Лондон')")
         connection.execute("INSERT INTO tasks VALUES (1, 1, '80', '80')")
         connection.execute("INSERT INTO task_prompt_parts VALUES (1, 1, 1, 'text', 'Prompt', NULL)")
+        connection.execute(
+            """
+            INSERT INTO task_attempts (
+                user_id, stage_number, task_number, attempt_number,
+                raw_answer, normalized_answer, event_at_ms, recorded_at_ms, source_update_id
+            ) VALUES (?, 1, 1, 1, '８０', '80', ?, ?, 1)
+            """,
+            (CAPTAIN_ID, BASE_TIME_MS, BASE_TIME_MS),
+        )
 
     with SQLiteQuestStore.open(database, lock_instance=False) as migrated:
-        assert migrated.schema_version == 3
+        assert migrated.schema_version == 4
         captain = migrated.get_user(CAPTAIN_ID)
         assert captain is not None
         assert captain.display_name == "@passepartout"
         task = migrated.get_task(1, 1)
         assert task is not None
         assert task.name is None
+        assert task.correct_answers == ("80",)
+        progress = migrated.list_task_progress(CAPTAIN_ID)
+        assert len(progress) == 1
+        assert progress[0].solved
+        assert progress[0].points == 10
 
     with sqlite3.connect(database) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
@@ -94,7 +108,17 @@ def test_v1_database_migrates_usernames_and_adds_optional_task_names(tmp_path: P
     assert "users_display_name_nocase_idx" in indexes
     with sqlite3.connect(database) as connection:
         task_columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
+        answer_rows = connection.execute(
+            """
+            SELECT answer_number, raw_answer, normalized_answer
+            FROM task_correct_answers
+            ORDER BY answer_number
+            """
+        ).fetchall()
     assert "name" in task_columns
+    assert "correct_answer_raw" not in task_columns
+    assert "correct_answer_normalized" not in task_columns
+    assert answer_rows == [(1, "80", "80")]
 
 
 def test_transition_history_preserves_metadata_and_update_idempotency(
@@ -185,12 +209,12 @@ def test_task_limit_is_enforced_atomically(store: SQLiteQuestStore) -> None:
     store.set_stage(1, "Лондон")
     prompt = [ContentPart(ContentType.TEXT, "Prompt")]
     with pytest.raises(ValueError, match="prompt"):
-        store.set_task(1, 1, "1", [])
+        store.set_task(1, 1, ("1",), [])
     for task_number in range(1, 10):
-        store.set_task(1, task_number, str(task_number), prompt)
+        store.set_task(1, task_number, (str(task_number),), prompt)
 
     with pytest.raises(TaskLimitExceededError):
-        store.set_task(1, 10, "10", prompt)
+        store.set_task(1, 10, ("10",), prompt)
 
-    store.set_task(1, 1, "updated", prompt)
+    store.set_task(1, 1, ("updated",), prompt)
     assert len(store.list_stage_tasks(1)) == 9

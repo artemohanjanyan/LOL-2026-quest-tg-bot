@@ -26,14 +26,14 @@ def seed_ready_quest(store: SQLiteQuestStore) -> None:
     store.set_task(
         1,
         1,
-        "80",
+        ("80", "eighty"),
         [ContentPart(ContentType.TEXT, "TASK ONE PROMPT: How many days?")],
         name="Реформ-клуб",
     )
     store.set_task(
         1,
         3,
-        "Філеас Фогг",
+        ("Філеас Фогг",),
         [
             ContentPart(ContentType.TEXT, "TASK THREE PROMPT: Name the traveller"),
             ContentPart(ContentType.DOCUMENT, "telegram-pdf-id", "Travel papers"),
@@ -47,6 +47,6 @@ def seed_second_stage(store: SQLiteQuestStore) -> None:
     store.set_task(
         4,
         2,
-        "Монголія",
+        ("Монголія",),
         [ContentPart(ContentType.VIDEO_NOTE, "telegram-video-note-id")],
     )

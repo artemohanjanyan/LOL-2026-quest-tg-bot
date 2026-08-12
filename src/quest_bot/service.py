@@ -25,6 +25,7 @@ from quest_bot.models import (
     UserRole,
     utc_now_ms,
 )
+from quest_bot.normalization import normalize_answer
 from quest_bot.storage.base import (
     AttemptLimitReachedError,
     RecordNotFoundError,
@@ -453,13 +454,21 @@ class QuestService:
         actor_id: int,
         stage_number: int,
         task_number: int,
-        correct_answer: str,
+        correct_answers: Sequence[str],
         prompt_parts: Sequence[ContentPart],
         *,
         name: str | None = None,
     ) -> Task:
         self.require_admin(actor_id)
-        if stage_number <= 0 or task_number <= 0 or not correct_answer.strip():
+        answers = tuple(answer.strip() for answer in correct_answers)
+        normalized_answers = tuple(normalize_answer(answer) for answer in answers)
+        if (
+            stage_number <= 0
+            or task_number <= 0
+            or not answers
+            or any(not answer for answer in answers)
+            or len(set(normalized_answers)) != len(normalized_answers)
+        ):
             raise ContentValidationError("invalid task")
         self._validate_parts(prompt_parts)
         normalized_name = name.strip() or None if name is not None else None
@@ -467,7 +476,7 @@ class QuestService:
             return self.store.set_task(
                 stage_number,
                 task_number,
-                correct_answer,
+                answers,
                 prompt_parts,
                 name=normalized_name,
             )

@@ -50,11 +50,13 @@ retaining their transition history and recording the reset as a new transition.
 Multipart `/set_intro`, `/set_success_outro`, `/set_timeout_outro`, `/set_task`,
 and `/broadcast` workflows accept text, photo, sticker, voice, document, video,
 and video-note messages. Send parts in order and publish with `/done`; `/cancel`
-discards the in-memory draft. Task drafts additionally require
-`/correct_answer <answer>`. Tasks may have an optional name supplied through
-`/set_task <stage-number> <task-number> [name]`; the bot emphasizes that name in
-bold when presenting the task. Stage names are configured directly with
-`/set_stage <number> <name>`; there is deliberately no stage-level prompt.
+discards the in-memory draft. Task drafts require at least one
+`/correct_answer <answer>`; repeat the command to add more accepted variants.
+Publishing a task replaces its complete answer list. Tasks may have an optional
+name supplied through `/set_task <stage-number> <task-number> [name]`; the bot
+emphasizes that name in bold when presenting the task. Stage names are configured
+directly with `/set_stage <number> <name>`; there is deliberately no stage-level
+prompt.
 
 Configuration is global and live rather than versioned. Task attempts are
 retained even when content is deleted, so recreating the same
