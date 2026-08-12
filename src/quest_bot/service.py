@@ -16,10 +16,12 @@ from quest_bot.models import (
     CaptainPosition,
     CaptainState,
     CaptainSummary,
+    CaptainTransition,
     ContentPart,
     OutroKind,
     Stage,
     Task,
+    TaskAttempt,
     TaskProgress,
     User,
     UserRole,
@@ -88,6 +90,23 @@ class CaptainProgressReport:
     snapshot: StatusSnapshot
     started_at_ms: int | None
     tasks: tuple[TaskProgress, ...]
+    stages: tuple[Stage, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerActivity:
+    attempt: TaskAttempt
+    currently_correct: bool
+    credited: bool
+    points: int
+
+
+@dataclass(frozen=True, slots=True)
+class CaptainActivityReport:
+    snapshot: StatusSnapshot
+    started_at_ms: int | None
+    transitions: tuple[CaptainTransition, ...]
+    answers: tuple[AnswerActivity, ...]
     stages: tuple[Stage, ...]
 
 
@@ -555,22 +574,99 @@ class QuestService:
         self.require_admin(actor_id)
         target = self.resolve_user(reference)
         snapshot = self._status_snapshot(target)
-        started_at_ms = None
-        if snapshot.state.started_at_ms is not None:
-            started_at_ms = next(
-                (
-                    transition.event_at_ms
-                    for transition in reversed(self.store.list_captain_transitions(target.user_id))
-                    if transition.from_position is CaptainPosition.NOT_STARTED
-                    and transition.to_position is CaptainPosition.INTRO
-                ),
-                snapshot.state.started_at_ms,
-            )
+        transitions = self.store.list_captain_transitions(target.user_id)
+        start = self._current_run_start(snapshot, transitions)
+        started_at_ms = start.event_at_ms if start is not None else snapshot.state.started_at_ms
         return CaptainProgressReport(
             snapshot=snapshot,
             started_at_ms=started_at_ms,
             tasks=self.store.list_task_progress(target.user_id),
             stages=self.store.list_stages(),
+        )
+
+    def captain_activity(self, actor_id: int, reference: str) -> CaptainActivityReport:
+        self.require_admin(actor_id)
+        target = self.resolve_user(reference)
+        snapshot = self._status_snapshot(target)
+        all_transitions = self.store.list_captain_transitions(target.user_id)
+        start = self._current_run_start(snapshot, all_transitions)
+        started_at_ms = start.event_at_ms if start is not None else snapshot.state.started_at_ms
+        stages = self.store.list_stages()
+        if started_at_ms is None:
+            return CaptainActivityReport(snapshot, None, (), (), stages)
+
+        current_transitions = tuple(
+            transition
+            for transition in all_transitions
+            if (
+                transition.sequence_number >= start.sequence_number
+                if start is not None
+                else transition.event_at_ms >= started_at_ms
+            )
+        )
+        current_attempts = tuple(
+            attempt
+            for attempt in self.store.list_task_attempts(target.user_id)
+            if attempt.event_at_ms >= started_at_ms
+        )
+        accepted_answers = {
+            (task.stage_number, task.task_number): frozenset(
+                normalize_answer(answer) for answer in task.correct_answers
+            )
+            for stage in stages
+            for task in self.store.list_stage_tasks(stage.stage_number)
+        }
+        progress = {
+            (task.stage_number, task.task_number): task
+            for task in self.store.list_task_progress(target.user_id)
+        }
+        answers = tuple(
+            self._answer_activity(attempt, accepted_answers, progress)
+            for attempt in current_attempts
+        )
+        return CaptainActivityReport(
+            snapshot=snapshot,
+            started_at_ms=started_at_ms,
+            transitions=current_transitions,
+            answers=answers,
+            stages=stages,
+        )
+
+    @staticmethod
+    def _current_run_start(
+        snapshot: StatusSnapshot,
+        transitions: tuple[CaptainTransition, ...],
+    ) -> CaptainTransition | None:
+        if snapshot.state.started_at_ms is None:
+            return None
+        return next(
+            (
+                transition
+                for transition in reversed(transitions)
+                if transition.from_position is CaptainPosition.NOT_STARTED
+                and transition.to_position is CaptainPosition.INTRO
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _answer_activity(
+        attempt: TaskAttempt,
+        accepted_answers: dict[tuple[int, int], frozenset[str]],
+        progress: dict[tuple[int, int], TaskProgress],
+    ) -> AnswerActivity:
+        key = (attempt.stage_number, attempt.task_number)
+        currently_correct = attempt.normalized_answer in accepted_answers.get(key, frozenset())
+        task_progress = progress.get(key)
+        credited = (
+            task_progress is not None
+            and task_progress.solved_attempt_number == attempt.attempt_number
+        )
+        return AnswerActivity(
+            attempt=attempt,
+            currently_correct=currently_correct,
+            credited=credited,
+            points=task_progress.points if credited and task_progress is not None else 0,
         )
 
     def resolve_user(self, reference: str) -> User:

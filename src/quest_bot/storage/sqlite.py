@@ -22,6 +22,7 @@ from quest_bot.models import (
     RecordedAttempt,
     Stage,
     Task,
+    TaskAttempt,
     TaskProgress,
     User,
     UserRole,
@@ -1010,6 +1011,17 @@ class SQLiteQuestStore:
         )
         return tuple((int(row["task_number"]), int(row["attempt_count"])) for row in rows)
 
+    def list_task_attempts(self, user_id: int) -> tuple[TaskAttempt, ...]:
+        rows = self._connection_or_raise().execute(
+            """
+            SELECT * FROM task_attempts
+            WHERE user_id = ?
+            ORDER BY event_at_ms, recorded_at_ms, attempt_id
+            """,
+            (user_id,),
+        )
+        return tuple(self._task_attempt_from_row(row) for row in rows)
+
     def list_task_progress(self, user_id: int) -> tuple[TaskProgress, ...]:
         rows = self._connection_or_raise().execute(
             """
@@ -1186,6 +1198,21 @@ class SQLiteQuestStore:
             position=CaptainPosition(str(row["position"])),
             started_at_ms=SQLiteQuestStore._optional_int(row["started_at_ms"]),
             current_stage_number=SQLiteQuestStore._optional_int(row["current_stage_number"]),
+        )
+
+    @staticmethod
+    def _task_attempt_from_row(row: sqlite3.Row) -> TaskAttempt:
+        return TaskAttempt(
+            attempt_id=int(row["attempt_id"]),
+            user_id=int(row["user_id"]),
+            stage_number=int(row["stage_number"]),
+            task_number=int(row["task_number"]),
+            attempt_number=int(row["attempt_number"]),
+            raw_answer=str(row["raw_answer"]),
+            normalized_answer=str(row["normalized_answer"]),
+            event_at_ms=int(row["event_at_ms"]),
+            recorded_at_ms=int(row["recorded_at_ms"]),
+            source_update_id=int(row["source_update_id"]),
         )
 
     @staticmethod

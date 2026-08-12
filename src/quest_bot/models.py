@@ -105,6 +105,20 @@ class RecordedAttempt:
 
 
 @dataclass(frozen=True, slots=True)
+class TaskAttempt:
+    attempt_id: int
+    user_id: int
+    stage_number: int
+    task_number: int
+    attempt_number: int
+    raw_answer: str
+    normalized_answer: str
+    event_at_ms: int
+    recorded_at_ms: int
+    source_update_id: int
+
+
+@dataclass(frozen=True, slots=True)
 class TaskProgress:
     stage_number: int
     task_number: int

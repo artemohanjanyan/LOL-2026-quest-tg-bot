@@ -42,6 +42,10 @@ Deactivating a captain does not delete their history.
 Only the owner administrator configured through `QUEST_ADMIN_ID` may add other
 administrators. Run `/help` for the role-specific command list.
 
+Administrators can inspect either a task-level summary with `/progress` or the
+chronological stage transitions and answer attempts of the current run with
+`/activity`.
+
 For testing, `/reset_captain` prepares a progress reset that must be completed
 with `/confirm_reset_captain` or abandoned with `/cancel`. A confirmed reset
 deletes the captain's task attempts and returns them to `not_started`, while

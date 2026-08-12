@@ -53,6 +53,7 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 /list_users — показати учасників
 /leaderboard — показати таблицю результатів
 /progress <@username|telegram_id> — показати прогрес капітана
+/activity <@username|telegram_id> — показати хронологію подорожі
 /broadcast — підготувати оголошення
 
 Редагування маршруту:
@@ -96,6 +97,7 @@ USAGE_ADD_CAPTAIN_BY_ID = (
 USAGE_REMOVE_CAPTAIN = "Формат: /remove_captain <telegram_id>"
 USAGE_RESET_CAPTAIN = "Формат: /reset_captain <@username або telegram_id>"
 USAGE_PROGRESS = "Формат: /progress <@username або telegram_id>"
+USAGE_ACTIVITY = "Формат: /activity <@username або telegram_id>"
 USAGE_SET_STAGE = "Формат: /set_stage <номер етапу> <назва>"
 USAGE_SET_TASK = "Формат: /set_task <номер етапу> <номер завдання> [назва завдання]"
 USAGE_CORRECT_ANSWER = "Формат: /correct_answer <відповідь>"

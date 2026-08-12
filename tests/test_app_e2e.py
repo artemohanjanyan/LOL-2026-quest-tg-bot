@@ -11,6 +11,7 @@ from telegram.ext import Application, CallbackContext
 from quest_bot import messages
 from quest_bot.app import SWEEP_HEARTBEAT_EVERY_KEY, create_application
 from quest_bot.config import Settings
+from quest_bot.handlers.admin.reports import _split_report
 from quest_bot.models import CaptainPosition
 from quest_bot.service import QuestService
 from quest_bot.storage.sqlite import SQLiteQuestStore
@@ -352,6 +353,69 @@ async def test_progress_reports_task_timing_attempts_and_points(
     assert "№3 — не розв’язано; спроб: 1; остання +00:04" in progress
     assert "Етап 4: Суець" in progress
     assert "№2 — без спроб" in progress
+
+
+@pytest.mark.asyncio
+async def test_activity_reports_current_run_answers_and_transitions_chronologically(
+    bot_harness: BotHarness,
+) -> None:
+    seed_second_stage(bot_harness.store)
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/answer 1 79")
+    await captain.send("/answer 1 eighty")
+    await captain.send("/answer 3 someone else")
+    await captain.send("/next_stage")
+    await captain.send("/confirm_next_stage")
+
+    bot_harness.telegram.clear()
+    await admin.send("/activity passepartout")
+
+    (activity,) = bot_harness.telegram.messages_to(ADMIN_ID)
+    assert "Позиція: етап 4 — Суець" in activity
+    assert "Бали: 8" in activity
+    assert activity.splitlines()[-7:] == [
+        "Хронологія поточної подорожі (відповіді оцінено за поточними налаштуваннями):",
+        "+00:00 — розпочато подорож",
+        "+00:01 — відкрито етап 1 «Лондон»",
+        "+00:02 — етап 1, завдання 1, спроба 1: «79» — неправильно",
+        "+00:03 — етап 1, завдання 1, спроба 2: «eighty» — зараховано, 8 балів",
+        "+00:04 — етап 1, завдання 3, спроба 1: «someone else» — неправильно",
+        "+00:06 — перехід: етап 1 «Лондон» → етап 4 «Суець»; залишено нерозв’язані завдання",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_activity_excludes_actions_before_latest_reset(bot_harness: BotHarness) -> None:
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/answer 1 80")
+    await admin.send(f"/reset_captain {CAPTAIN_ID}")
+    await admin.send("/confirm_reset_captain")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/answer 1 79")
+
+    bot_harness.telegram.clear()
+    await admin.send(f"/activity {CAPTAIN_ID}")
+
+    (activity,) = bot_harness.telegram.messages_to(ADMIN_ID)
+    assert activity.count("розпочато подорож") == 1
+    assert "«79» — неправильно" in activity
+    assert "«80»" not in activity
+
+
+def test_activity_report_splitting_preserves_long_content() -> None:
+    report = "x" * 8_001
+
+    chunks = _split_report(report)
+
+    assert "".join(chunks) == report
+    assert all(len(chunk) <= 4_000 for chunk in chunks)
 
 
 @pytest.mark.asyncio
