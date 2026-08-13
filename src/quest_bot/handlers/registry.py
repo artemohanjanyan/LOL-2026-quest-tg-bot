@@ -44,10 +44,6 @@ async def unknown_command(update: Update, context: object, *, deps: Dependencies
     await send_text(update, deps, messages.UNKNOWN_COMMAND)
 
 
-async def unknown_message(update: Update, context: object, *, deps: Dependencies) -> None:
-    await send_text(update, deps, messages.UNKNOWN_MESSAGE)
-
-
 def register_handlers(
     application: ApplicationType,
     deps: Dependencies,
@@ -63,7 +59,4 @@ def register_handlers(
         for handler in handlers:
             application.add_handler(handler)
     application.add_handler(MessageHandler(filters.COMMAND, partial(unknown_command, deps=deps)))
-    application.add_handler(
-        MessageHandler(filters.ALL & ~filters.COMMAND, partial(unknown_message, deps=deps))
-    )
     register_error_handler(application, deps)

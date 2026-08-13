@@ -11,6 +11,8 @@ from quest_bot.models import utc_now_ms
 from quest_bot.service import QuestService
 from quest_bot.storage.sqlite import SQLiteQuestStore
 
+POLLING_UPDATE_TYPES = (Update.MESSAGE, Update.CALLBACK_QUERY)
+
 
 def main() -> None:
     logging.basicConfig(
@@ -40,7 +42,7 @@ def main() -> None:
             store.schema_version,
             settings.sweep_interval_seconds,
         )
-        application.run_polling(allowed_updates=(Update.MESSAGE,))
+        application.run_polling(allowed_updates=POLLING_UPDATE_TYPES)
 
 
 if __name__ == "__main__":

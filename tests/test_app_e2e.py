@@ -6,9 +6,11 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from telegram import Update
 from telegram.ext import Application, CallbackContext
 
 from quest_bot import messages
+from quest_bot.__main__ import POLLING_UPDATE_TYPES
 from quest_bot.app import SWEEP_HEARTBEAT_EVERY_KEY, create_application
 from quest_bot.config import Settings
 from quest_bot.handlers.admin.reports import _split_report
@@ -27,6 +29,10 @@ from tests.quest_setup import (
 )
 
 type TestApplication = Application[Any, Any, Any, Any, Any, Any]
+
+
+def test_production_polling_accepts_button_callbacks() -> None:
+    assert POLLING_UPDATE_TYPES == (Update.MESSAGE, Update.CALLBACK_QUERY)
 
 
 @dataclass(slots=True)
@@ -196,22 +202,128 @@ async def test_next_stage_prints_name_labels_and_every_task_prompt(
         "sendVideo",
     ]
     assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
-        messages.stage_heading(1, "Лондон"),
-        messages.task_heading(1, "Лондон", 1, 2, "Реформ-клуб"),
+        messages.stage_heading(1, "Лондон", 2),
+        messages.task_heading(1, 1, 2, "Реформ-клуб"),
         "TASK ONE PROMPT: How many days?",
-        messages.task_heading(3, "Лондон", 2, 2),
+        messages.task_heading(3, 2, 2),
         "TASK THREE PROMPT: Name the traveller",
+    ]
+    assert calls[0][1]["entities"] == [
+        {
+            "type": "bold",
+            "offset": len("🌍 ".encode("utf-16-le")) // 2,
+            "length": len("ЕТАП 1"),
+        }
     ]
     assert calls[-2][1]["document"] == "telegram-pdf-id"
     assert calls[-1][1]["video"] == "telegram-video-id"
     assert calls[1][1]["entities"] == [
         {
             "type": "bold",
-            "offset": len("Завдання 1 — Лондон — "),
+            "offset": len("━━━━━━ 🧩 ".encode("utf-16-le")) // 2,
+            "length": len("ЗАВДАННЯ 1"),
+        },
+        {
+            "type": "bold",
+            "offset": len("━━━━━━ 🧩 ЗАВДАННЯ 1 ━━━━━━\n1 із 2 · ".encode("utf-16-le")) // 2,
             "length": len("Реформ-клуб"),
+        },
+    ]
+    assert "reply_markup" not in calls[1][1]
+    assert calls[2][1]["reply_markup"] == {
+        "inline_keyboard": [
+            [
+                {
+                    "callback_data": "answer-task:1:1",
+                    "text": messages.answer_button(1),
+                }
+            ]
+        ]
+    }
+    assert calls[3][1]["entities"] == [
+        {
+            "type": "bold",
+            "offset": len("━━━━━━ 🧩 ".encode("utf-16-le")) // 2,
+            "length": len("ЗАВДАННЯ 3"),
         }
     ]
-    assert "entities" not in calls[3][1]
+    assert "reply_markup" not in calls[3][1]
+    assert calls[-1][1]["reply_markup"] == {
+        "inline_keyboard": [
+            [
+                {
+                    "callback_data": "answer-task:1:3",
+                    "text": messages.answer_button(3),
+                }
+            ]
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_task_button_captures_next_text_message_as_answer(
+    bot_harness: BotHarness,
+) -> None:
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    task_prompt_call = next(
+        call
+        for call in bot_harness.telegram.calls_to(CAPTAIN_ID)
+        if call[1].get("text") == "TASK ONE PROMPT: How many days?"
+    )
+    button = task_prompt_call[1]["reply_markup"]["inline_keyboard"][0][0]
+    bot_harness.telegram.clear()
+
+    await captain.press_button(button["callback_data"])
+    await captain.send("/cancel")
+    await captain.press_button(button["callback_data"])
+    await captain.send("/status")
+    await captain.send("80")
+
+    sent = bot_harness.telegram.messages_to(CAPTAIN_ID)
+    assert sent[0] == messages.answer_prompt(1)
+    assert sent[1] == messages.ANSWER_CANCELLED
+    assert sent[2] == messages.answer_prompt(1)
+    assert "етап 1 — Лондон" in sent[3]
+    assert sent[4] == messages.answer_correct(points=10)
+    prompt_call = bot_harness.telegram.calls_to(CAPTAIN_ID)[2]
+    assert prompt_call[1]["reply_markup"] == {
+        "force_reply": True,
+        "input_field_placeholder": "Ваша відповідь",
+        "selective": True,
+    }
+    attempt = bot_harness.store.list_task_attempts(CAPTAIN_ID)[0]
+    assert attempt.task_number == 1
+    assert attempt.raw_answer == "80"
+
+
+@pytest.mark.asyncio
+async def test_task_button_from_an_old_stage_cannot_capture_an_answer(
+    bot_harness: BotHarness,
+) -> None:
+    seed_second_stage(bot_harness.store)
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    task_prompt_call = next(
+        call
+        for call in bot_harness.telegram.calls_to(CAPTAIN_ID)
+        if call[1].get("text") == "TASK ONE PROMPT: How many days?"
+    )
+    old_button = task_prompt_call[1]["reply_markup"]["inline_keyboard"][0][0]
+    await captain.send("/next_stage")
+    await captain.send("/confirm_next_stage")
+    bot_harness.telegram.clear()
+
+    await captain.press_button(old_button["callback_data"])
+    await captain.send("80")
+
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
+        messages.ANSWER_BUTTON_EXPIRED,
+        messages.UNKNOWN_MESSAGE,
+    ]
+    assert bot_harness.store.list_task_attempts(CAPTAIN_ID) == ()
 
 
 @pytest.mark.asyncio
@@ -461,8 +573,8 @@ async def test_unresolved_advance_requires_confirmation_then_prints_next_stage(
     sent = bot_harness.telegram.messages_to(CAPTAIN_ID)
     assert sent[:3] == [
         messages.SKIP_CONFIRMED,
-        messages.stage_heading(4, "Суець"),
-        messages.task_heading(2, "Суець", 1, 1),
+        messages.stage_heading(4, "Суець", 1),
+        messages.task_heading(2, 1, 1),
     ]
     calls = bot_harness.telegram.calls_to(CAPTAIN_ID)
     assert calls[-1][0] == "sendVideoNote"

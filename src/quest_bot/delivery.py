@@ -8,7 +8,15 @@ from datetime import timedelta
 from itertools import count
 from typing import Final, assert_never
 
-from telegram import Bot, Message, MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import (
+    Bot,
+    ForceReply,
+    InlineKeyboardMarkup,
+    Message,
+    MessageEntity,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from telegram.error import (
     BadRequest,
     Forbidden,
@@ -24,6 +32,7 @@ OUTRO_MAX_ATTEMPTS: Final = 3
 LOGGER = logging.getLogger(__name__)
 
 SleepCallable = Callable[[float], Awaitable[None]]
+type ReplyMarkup = ForceReply | InlineKeyboardMarkup | ReplyKeyboardMarkup | ReplyKeyboardRemove
 
 
 async def _default_sleep(delay_seconds: float) -> None:
@@ -56,18 +65,22 @@ class TelegramDelivery:
         self,
         chat_id: int,
         parts: Iterable[ContentPart],
+        *,
+        last_reply_markup: ReplyMarkup | None = None,
     ) -> None:
-        """Send parts sequentially in iterable order."""
+        """Send parts sequentially, optionally decorating the final part."""
 
-        for part in parts:
-            await self.send_part(chat_id, part)
+        ordered_parts = tuple(parts)
+        for index, part in enumerate(ordered_parts):
+            reply_markup = last_reply_markup if index == len(ordered_parts) - 1 else None
+            await self.send_part(chat_id, part, reply_markup=reply_markup)
 
     async def send_part(
         self,
         chat_id: int,
         part: ContentPart,
         *,
-        reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None = None,
+        reply_markup: ReplyMarkup | None = None,
         entities: Sequence[MessageEntity] | None = None,
     ) -> Message:
         """Send one part using its matching Telegram Bot API method."""
@@ -117,7 +130,7 @@ class TelegramDelivery:
         chat_id: int,
         part: ContentPart,
         *,
-        reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None,
+        reply_markup: ReplyMarkup | None,
         entities: Sequence[MessageEntity] | None,
     ) -> Message:
         """Call the matching Telegram Bot API method."""
@@ -137,11 +150,13 @@ class TelegramDelivery:
                     photo=part.data,
                     caption=part.caption,
                     parse_mode=PLAIN_PARSE_MODE,
+                    reply_markup=reply_markup,
                 )
             case ContentType.STICKER:
                 return await self._bot.send_sticker(
                     chat_id=chat_id,
                     sticker=part.data,
+                    reply_markup=reply_markup,
                 )
             case ContentType.VOICE:
                 return await self._bot.send_voice(
@@ -149,6 +164,7 @@ class TelegramDelivery:
                     voice=part.data,
                     caption=part.caption,
                     parse_mode=PLAIN_PARSE_MODE,
+                    reply_markup=reply_markup,
                 )
             case ContentType.DOCUMENT:
                 return await self._bot.send_document(
@@ -156,6 +172,7 @@ class TelegramDelivery:
                     document=part.data,
                     caption=part.caption,
                     parse_mode=PLAIN_PARSE_MODE,
+                    reply_markup=reply_markup,
                 )
             case ContentType.VIDEO:
                 return await self._bot.send_video(
@@ -163,11 +180,13 @@ class TelegramDelivery:
                     video=part.data,
                     caption=part.caption,
                     parse_mode=PLAIN_PARSE_MODE,
+                    reply_markup=reply_markup,
                 )
             case ContentType.VIDEO_NOTE:
                 return await self._bot.send_video_note(
                     chat_id=chat_id,
                     video_note=part.data,
+                    reply_markup=reply_markup,
                 )
 
         assert_never(part.content_type)

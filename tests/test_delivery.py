@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, field
 
 import pytest
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 from telegram.warnings import PTBDeprecationWarning
 
@@ -56,9 +56,16 @@ async def test_ordered_delivery_supports_all_quest_content_types(
         ContentPart(ContentType.VIDEO, "video-id", "crossing"),
         ContentPart(ContentType.VIDEO_NOTE, "video-note-id"),
     )
+    answer_markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Answer", callback_data="answer:7")]]
+    )
 
     async with bot:
-        await TelegramDelivery(bot).send_parts(202, parts)
+        await TelegramDelivery(bot).send_parts(
+            202,
+            parts,
+            last_reply_markup=answer_markup,
+        )
 
     calls = telegram_request.calls_to(202)
     assert [method for method, _ in calls] == [
@@ -75,6 +82,10 @@ async def test_ordered_delivery_supports_all_quest_content_types(
     assert calls[4][1]["caption"] == "tickets.pdf"
     assert calls[5][1]["video"] == "video-id"
     assert calls[6][1]["video_note"] == "video-note-id"
+    assert all("reply_markup" not in parameters for _, parameters in calls[:-1])
+    assert calls[-1][1]["reply_markup"] == {
+        "inline_keyboard": [[{"callback_data": "answer:7", "text": "Answer"}]]
+    }
 
 
 @pytest.mark.asyncio

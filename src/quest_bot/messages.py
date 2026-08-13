@@ -14,8 +14,8 @@ INACTIVE_USER = "Ваш маршрут призупинено організат
 PERMISSION_DENIED = "Ця команда доступна лише організаторам експедиції."
 UNKNOWN_COMMAND = "Не впізнаю цю команду. Звіртеся з путівником: /help."
 UNKNOWN_MESSAGE = (
-    "Не впізнаю повідомлення. Для відповіді використайте /answer, "
-    "а список команд доступний у /help."
+    "Не впізнаю повідомлення. Оберіть завдання кнопкою «Відповісти» "
+    "або скористайтеся /answer; список команд доступний у /help."
 )
 TECHNICAL_ERROR = "На маршруті сталася технічна затримка. Спробуйте ще раз трохи згодом."
 NOTHING_TO_CANCEL = "Немає операції, яку можна скасувати."
@@ -39,6 +39,8 @@ CAPTAIN_HELP = f"""Команди капітана:
 /help — відкрити путівник капітана
 
 Як відповідати:
+Натисніть кнопку під потрібним завданням і надішліть відповідь наступним повідомленням.
+Також можна скористатися командою:
 {ANSWER_GUIDE}"""
 
 ADMIN_HELP = f"""{CAPTAIN_HELP}
@@ -222,19 +224,22 @@ def status_timed_out(*, score: int) -> str:
     )
 
 
-def stage_heading(stage_number: int, stage_name: str) -> str:
-    return f"Етап {stage_number}: {stage_name}"
+def stage_heading(stage_number: int, stage_name: str, task_count: int) -> str:
+    return f"🌍 ЕТАП {stage_number}\n{stage_name}\nЗавдань: {task_count}"
 
 
 def task_heading(
     task_number: int,
-    stage_name: str,
     ordinal: int,
     total: int,
     task_name: str | None = None,
 ) -> str:
-    name = f" — {task_name}" if task_name is not None else ""
-    return f"Завдання {task_number} — {stage_name}{name} ({ordinal} із {total})"
+    heading = f"━━━━━━ 🧩 ЗАВДАННЯ {task_number} ━━━━━━\n{ordinal} із {total}"
+    return f"{heading} · {task_name}" if task_name is not None else heading
+
+
+def answer_button(task_number: int) -> str:
+    return f"✍️ Відповісти на завдання {task_number}"
 
 
 # Answers and transitions ------------------------------------------------------
@@ -245,7 +250,20 @@ ATTEMPTS_EXHAUSTED = (
     "Спроби для цього завдання вичерпано. Нові відповіді на нього більше не приймаються."
 )
 ANSWER_NOT_AVAILABLE = "Відповідати можна лише на завдання поточного етапу."
+ANSWER_BUTTON_EXPIRED = (
+    "Ця кнопка вже не актуальна. "
+    "Повторно відкрийте поточний етап командою /stage й оберіть завдання."
+)
+ANSWER_CANCELLED = "Подання відповіді скасовано."
+ANSWER_TEXT_REQUIRED = "Надішліть відповідь одним текстовим повідомленням."
 TERMINAL_PLAY_REJECTED = "Ця подорож уже завершена; нові відповіді та переходи закрито."
+
+
+def answer_prompt(task_number: int) -> str:
+    return (
+        f"Введіть відповідь на завдання {task_number} одним повідомленням.\n"
+        "Щоб відмовитися, надішліть /cancel."
+    )
 
 
 def answer_correct(*, points: int) -> str:

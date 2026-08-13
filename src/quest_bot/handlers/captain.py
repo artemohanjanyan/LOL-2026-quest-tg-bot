@@ -2,11 +2,12 @@
 
 from functools import partial
 
-from telegram import ReplyKeyboardRemove, Update
-from telegram.ext import CommandHandler, ContextTypes
+from telegram import ForceReply, ReplyKeyboardRemove, Update
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from quest_bot import messages
 from quest_bot.handlers.common import (
+    TASK_ANSWER_CALLBACK_PATTERN,
     Dependencies,
     HandlerType,
     actor_id,
@@ -25,6 +26,7 @@ from quest_bot.models import CaptainPosition, ContentPart, ContentType, UserRole
 from quest_bot.service import AdvanceResult
 
 _PENDING_SKIP_KEY_PREFIX = "captain:pending-skip-stage:"
+_PENDING_ANSWER_KEY_PREFIX = "captain:pending-answer:"
 
 
 def _pending_skip_key(update: Update) -> str:
@@ -54,6 +56,47 @@ def _clear_pending_skip(
     return user_data(context).pop(_pending_skip_key(update), None) is not None
 
 
+def _pending_answer_key(update: Update) -> str:
+    return f"{_PENDING_ANSWER_KEY_PREFIX}{chat_id(update)}"
+
+
+def _remember_pending_answer(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    stage_number: int,
+    task_number: int,
+) -> None:
+    user_data(context)[_pending_answer_key(update)] = (stage_number, task_number)
+
+
+def _pending_answer(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> tuple[int, int] | None:
+    value = user_data(context).get(_pending_answer_key(update))
+    if (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and all(type(number) is int for number in value)
+    ):
+        return value
+    return None
+
+
+def _clear_pending_answer(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> tuple[int, int] | None:
+    value = user_data(context).pop(_pending_answer_key(update), None)
+    if (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and all(type(number) is int for number in value)
+    ):
+        return value
+    return None
+
+
 async def _send_help(update: Update, deps: Dependencies) -> None:
     user = deps.service.require_user(actor_id(update))
     await send_text(
@@ -75,6 +118,7 @@ async def _deliver_advance(
     skipped: bool,
 ) -> None:
     _clear_pending_skip(update, context)
+    _clear_pending_answer(update, context)
     if result.finished:
         prefix = (ContentPart(ContentType.TEXT, messages.SKIP_CONFIRMED),) if skipped else ()
         await deps.delivery.send_outro(
@@ -89,7 +133,7 @@ async def _deliver_advance(
     if skipped:
         await send_text(update, deps, messages.SKIP_CONFIRMED)
     if result.presentation is not None:
-        await send_stage(update, deps, result.presentation)
+        await send_stage(update, deps, result.presentation, answer_buttons=True)
 
 
 async def start(
@@ -124,7 +168,12 @@ async def start(
         await send_text(update, deps, messages.INTRO_POSITION)
     elif result.state.position is CaptainPosition.STAGE:
         await send_text(update, deps, messages.QUEST_ALREADY_STARTED)
-        await send_stage(update, deps, deps.service.get_stage(actor_id(update)))
+        await send_stage(
+            update,
+            deps,
+            deps.service.get_stage(actor_id(update)),
+            answer_buttons=True,
+        )
 
 
 async def next_stage(
@@ -181,6 +230,7 @@ async def answer(
     *,
     deps: Dependencies,
 ) -> None:
+    _clear_pending_answer(update, context)
     parsed = parse_numbered_text(context)
     if parsed is None:
         await send_text(update, deps, messages.USAGE_ANSWER)
@@ -190,6 +240,15 @@ async def answer(
         await send_text(update, deps, messages.USAGE_ANSWER)
         return
 
+    await _submit_answer(update, deps, task_number, raw_answer)
+
+
+async def _submit_answer(
+    update: Update,
+    deps: Dependencies,
+    task_number: int,
+    raw_answer: str,
+) -> None:
     result = deps.service.answer(
         actor_id(update),
         task_number,
@@ -205,6 +264,87 @@ async def answer(
             can_retry=result.can_retry,
         )
     await send_text(update, deps, text)
+
+
+async def choose_answer_task(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    deps: Dependencies,
+) -> None:
+    query = update.callback_query
+    if query is None or query.data is None:
+        return
+    await query.answer()
+    _, stage_text, task_text = query.data.split(":")
+    stage_number = int(stage_text)
+    task_number = int(task_text)
+
+    captain_id = actor_id(update)
+    snapshot = deps.service.status(captain_id)
+    if snapshot.state.position.is_terminal:
+        _clear_pending_answer(update, context)
+        await send_text(update, deps, messages.TERMINAL_PLAY_REJECTED)
+        return
+    if snapshot.state.position is not CaptainPosition.STAGE:
+        _clear_pending_answer(update, context)
+        await send_text(update, deps, messages.ANSWER_NOT_AVAILABLE)
+        return
+    if snapshot.state.current_stage_number != stage_number:
+        _clear_pending_answer(update, context)
+        await send_text(update, deps, messages.ANSWER_BUTTON_EXPIRED)
+        return
+
+    presentation = deps.service.get_stage(captain_id)
+    if not any(task.task_number == task_number for task in presentation.tasks):
+        _clear_pending_answer(update, context)
+        await send_text(update, deps, messages.ANSWER_BUTTON_EXPIRED)
+        return
+
+    _remember_pending_answer(update, context, stage_number, task_number)
+    await send_text(
+        update,
+        deps,
+        messages.answer_prompt(task_number),
+        reply_markup=ForceReply(
+            selective=True,
+            input_field_placeholder="Ваша відповідь",
+        ),
+    )
+
+
+async def answer_message_or_unknown(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    deps: Dependencies,
+) -> None:
+    pending = _pending_answer(update, context)
+    if pending is None:
+        await send_text(update, deps, messages.UNKNOWN_MESSAGE)
+        return
+
+    message = update.effective_message
+    if message is None or message.text is None:
+        await send_text(update, deps, messages.ANSWER_TEXT_REQUIRED)
+        return
+
+    stage_number, task_number = pending
+    snapshot = deps.service.status(actor_id(update))
+    if snapshot.state.position.is_terminal:
+        _clear_pending_answer(update, context)
+        await send_text(update, deps, messages.TERMINAL_PLAY_REJECTED)
+        return
+    if (
+        snapshot.state.position is not CaptainPosition.STAGE
+        or snapshot.state.current_stage_number != stage_number
+    ):
+        _clear_pending_answer(update, context)
+        await send_text(update, deps, messages.ANSWER_BUTTON_EXPIRED)
+        return
+
+    _clear_pending_answer(update, context)
+    await _submit_answer(update, deps, task_number, message.text)
 
 
 async def status(
@@ -235,7 +375,12 @@ async def stage(
         )
         await send_text(update, deps, messages.INTRO_POSITION)
     elif snapshot.state.position is CaptainPosition.STAGE:
-        await send_stage(update, deps, deps.service.get_stage(captain_id))
+        await send_stage(
+            update,
+            deps,
+            deps.service.get_stage(captain_id),
+            answer_buttons=True,
+        )
     else:
         await send_text(update, deps, render_status(snapshot))
 
@@ -262,6 +407,9 @@ async def cancel(
     elif clear_pending_captain_add(update, context) is not None:
         text = messages.CAPTAIN_PICKER_CANCELLED
         reply_markup = ReplyKeyboardRemove()
+    elif _clear_pending_answer(update, context) is not None:
+        text = messages.ANSWER_CANCELLED
+        reply_markup = None
     elif _clear_pending_skip(update, context):
         text = messages.SKIP_CANCELLED
         reply_markup = None
@@ -277,6 +425,10 @@ def build_handlers(
     """Build captain command handlers with dependencies bound explicitly."""
 
     return [
+        CallbackQueryHandler(
+            partial(choose_answer_task, deps=deps),
+            pattern=TASK_ANSWER_CALLBACK_PATTERN,
+        ),
         CommandHandler("start", partial(start, deps=deps)),
         CommandHandler("next_stage", partial(next_stage, deps=deps)),
         CommandHandler(
@@ -288,4 +440,8 @@ def build_handlers(
         CommandHandler("stage", partial(stage, deps=deps)),
         CommandHandler("help", partial(help_command, deps=deps)),
         CommandHandler("cancel", partial(cancel, deps=deps)),
+        MessageHandler(
+            filters.ALL & ~filters.COMMAND,
+            partial(answer_message_or_unknown, deps=deps),
+        ),
     ]

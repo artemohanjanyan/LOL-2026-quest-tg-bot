@@ -341,7 +341,7 @@ async def show_stage(
     except NotFound:
         await send_text(update, deps, messages.STAGE_NOT_FOUND)
         return
-    await send_stage(update, deps, presentation)
+    await send_stage(update, deps, presentation, answer_buttons=False)
     for task in presentation.tasks:
         await send_text(
             update,

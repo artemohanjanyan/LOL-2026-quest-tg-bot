@@ -62,7 +62,7 @@ class FakeTelegramRequest(BaseRequest):
             result: Any = self._bot_user
         elif api_method in self.SEND_METHODS:
             result = self._sent_message(parameters)
-        elif api_method == "setMyCommands":
+        elif api_method in {"answerCallbackQuery", "setMyCommands"}:
             result = True
         else:
             raise AssertionError(f"Unexpected Bot API method: {api_method}")
@@ -214,6 +214,49 @@ class TelegramUser:
             "users": [shared_user],
         }
         await self._process_message(message)
+
+    async def press_button(self, callback_data: str) -> None:
+        self._next_update_id += 1
+        self._timestamp += 1
+        sender: dict[str, Any] = {
+            "id": self.user_id,
+            "is_bot": False,
+            "first_name": "Test",
+        }
+        chat: dict[str, Any] = {
+            "id": self.user_id,
+            "type": "private",
+            "first_name": "Test",
+        }
+        if self.username is not None:
+            sender["username"] = self.username
+            chat["username"] = self.username
+        update = Update.de_json(
+            {
+                "update_id": self._next_update_id,
+                "callback_query": {
+                    "id": f"callback-{self._next_update_id}",
+                    "from": sender,
+                    "chat_instance": "test-chat-instance",
+                    "data": callback_data,
+                    "message": {
+                        "message_id": self._next_update_id - 1,
+                        "date": self._timestamp,
+                        "chat": chat,
+                        "from": {
+                            "id": 999_001,
+                            "is_bot": True,
+                            "first_name": "Quest test bot",
+                            "username": "quest_test_bot",
+                        },
+                        "text": "Task heading",
+                    },
+                },
+            },
+            self.application.bot,
+        )
+        self._last_update = update
+        await self.application.process_update(update)
 
     async def edit_last_message(self, text: str) -> None:
         if self._last_message is None or "text" not in self._last_message:

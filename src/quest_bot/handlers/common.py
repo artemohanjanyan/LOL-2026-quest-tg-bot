@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
-from telegram import Message, MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, MessageEntity, Update
 from telegram.ext import Application, BaseHandler, ContextTypes, ExtBot, JobQueue
 
 from quest_bot import messages
-from quest_bot.delivery import TelegramDelivery
+from quest_bot.delivery import ReplyMarkup, TelegramDelivery
 from quest_bot.errors import (
     ContentValidationError,
     InactiveUser,
@@ -27,6 +27,7 @@ from quest_bot.service import QuestService, StagePresentation, StatusSnapshot
 LOGGER = logging.getLogger(__name__)
 _PENDING_CAPTAIN_RESET_KEY_PREFIX = "admin:pending-captain-reset:"
 _PENDING_CAPTAIN_ADD_KEY_PREFIX = "admin:pending-captain-add:"
+TASK_ANSWER_CALLBACK_PATTERN = r"^answer-task:(\d+):(\d+)$"
 type ApplicationType = Application[
     ExtBot[int],
     ContextTypes.DEFAULT_TYPE,
@@ -161,12 +162,16 @@ def clear_pending_captain_add(
     return value if type(value) is int else None
 
 
+def task_answer_callback_data(stage_number: int, task_number: int) -> str:
+    return f"answer-task:{stage_number}:{task_number}"
+
+
 async def send_text(
     update: Update,
     deps: Dependencies,
     text: str,
     *,
-    reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None = None,
+    reply_markup: ReplyMarkup | None = None,
     entities: Sequence[MessageEntity] | None = None,
 ) -> None:
     await deps.delivery.send_part(
@@ -177,38 +182,85 @@ async def send_text(
     )
 
 
-async def send_stage(update: Update, deps: Dependencies, presentation: StagePresentation) -> None:
+async def send_stage(
+    update: Update,
+    deps: Dependencies,
+    presentation: StagePresentation,
+    *,
+    answer_buttons: bool,
+) -> None:
+    total = len(presentation.tasks)
+    stage_heading = messages.stage_heading(
+        presentation.stage.stage_number,
+        presentation.stage.name,
+        total,
+    )
+    stage_label = f"ЕТАП {presentation.stage.stage_number}"
     await send_text(
         update,
         deps,
-        messages.stage_heading(
-            presentation.stage.stage_number,
-            presentation.stage.name,
+        stage_heading,
+        entities=MessageEntity.adjust_message_entities_to_utf_16(
+            stage_heading,
+            [
+                MessageEntity(
+                    MessageEntity.BOLD,
+                    stage_heading.index(stage_label),
+                    len(stage_label),
+                )
+            ],
         ),
     )
-    total = len(presentation.tasks)
     for ordinal, task in enumerate(presentation.tasks, start=1):
         heading = messages.task_heading(
             task.task_number,
-            presentation.stage.name,
             ordinal,
             total,
             task.name,
         )
-        entities = None
+        task_label = f"ЗАВДАННЯ {task.task_number}"
+        entities = [
+            MessageEntity(
+                MessageEntity.BOLD,
+                heading.index(task_label),
+                len(task_label),
+            )
+        ]
         if task.name is not None:
-            name_offset = len(f"Завдання {task.task_number} — {presentation.stage.name} — ")
-            entities = MessageEntity.adjust_message_entities_to_utf_16(
-                heading,
-                [MessageEntity(MessageEntity.BOLD, name_offset, len(task.name))],
+            entities.append(
+                MessageEntity(
+                    MessageEntity.BOLD,
+                    heading.rindex(task.name),
+                    len(task.name),
+                )
             )
         await send_text(
             update,
             deps,
             heading,
-            entities=entities,
+            entities=MessageEntity.adjust_message_entities_to_utf_16(heading, entities),
         )
-        await deps.delivery.send_parts(chat_id(update), task.prompt_parts)
+        await deps.delivery.send_parts(
+            chat_id(update),
+            task.prompt_parts,
+            last_reply_markup=(
+                InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                messages.answer_button(task.task_number),
+                                callback_data=task_answer_callback_data(
+                                    task.stage_number,
+                                    task.task_number,
+                                ),
+                            )
+                        ]
+                    ]
+                )
+                if answer_buttons
+                else None
+            ),
+        )
 
 
 def render_status(snapshot: StatusSnapshot) -> str:
