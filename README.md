@@ -40,7 +40,10 @@ commands and enroll captains through Telegram's native user picker without
 copying IDs. All administrators retain `/add_captain_by_id` as a manual fallback.
 Deactivating a captain does not delete their history.
 Only the owner administrator configured through `QUEST_ADMIN_ID` may add other
-administrators. Run `/help` for the role-specific command list.
+administrators. For admins, `/help` lists active-quest operations and shows
+owner-only administration when applicable; `/captain_help` shows the captain
+reference, and `/setup_help` lists route
+configuration commands. Captains receive their own command list from `/help`.
 
 Administrators can inspect either a task-level summary with `/progress` or the
 chronological stage transitions and answer attempts of the current run with

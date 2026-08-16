@@ -394,6 +394,26 @@ async def help_command(
     await _send_help(update, deps)
 
 
+async def captain_help_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    deps: Dependencies,
+) -> None:
+    deps.service.require_admin(actor_id(update))
+    await send_text(update, deps, messages.CAPTAIN_HELP)
+
+
+async def setup_help_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    deps: Dependencies,
+) -> None:
+    deps.service.require_admin(actor_id(update))
+    await send_text(update, deps, messages.SETUP_HELP)
+
+
 async def cancel(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -439,6 +459,8 @@ def build_handlers(
         CommandHandler("status", partial(status, deps=deps)),
         CommandHandler("stage", partial(stage, deps=deps)),
         CommandHandler("help", partial(help_command, deps=deps)),
+        CommandHandler("captain_help", partial(captain_help_command, deps=deps)),
+        CommandHandler("setup_help", partial(setup_help_command, deps=deps)),
         CommandHandler("cancel", partial(cancel, deps=deps)),
         MessageHandler(
             filters.ALL & ~filters.COMMAND,

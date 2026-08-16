@@ -703,12 +703,23 @@ async def test_only_owner_admin_can_add_admin_or_see_command(
 ) -> None:
     owner = bot_harness.user(ADMIN_ID, "organizer")
     await owner.send("/help")
-    owner_help = bot_harness.telegram.messages_to(ADMIN_ID)[-1]
-    assert "/add_admin" in owner_help
+    await owner.send("/captain_help")
+    await owner.send("/setup_help")
+    owner_help, captain_help, owner_setup_help = bot_harness.telegram.messages_to(ADMIN_ID)[-3:]
+    assert owner_help == messages.OWNER_ADMIN_HELP
     assert "/add_captain_by_id" in owner_help
-    assert "/confirm_next_stage" not in owner_help
-    assert "/confirm_reset_captain" not in owner_help
-    assert "/cancel" not in owner_help
+    assert "/captain_help" in owner_help
+    assert "/setup_help" in owner_help
+    assert "/start" not in owner_help
+    assert "/set_intro" not in owner_help
+    assert "/add_admin" in owner_help
+    assert captain_help == messages.CAPTAIN_HELP
+    assert owner_setup_help == messages.SETUP_HELP
+    assert "/set_intro" in owner_setup_help
+    assert "/add_admin" not in owner_setup_help
+    assert "/confirm_next_stage" not in owner_setup_help
+    assert "/confirm_reset_captain" not in owner_setup_help
+    assert "/cancel" not in owner_setup_help
 
     await owner.send(f"/add_admin {OTHER_CAPTAIN_ID} @stationmaster")
     added = bot_harness.store.get_user(OTHER_CAPTAIN_ID)
@@ -718,18 +729,30 @@ async def test_only_owner_admin_can_add_admin_or_see_command(
 
     regular_admin = bot_harness.user(OTHER_CAPTAIN_ID, "stationmaster")
     await regular_admin.send("/help")
+    await regular_admin.send("/captain_help")
+    await regular_admin.send("/setup_help")
     await regular_admin.send("/add_admin 404 conductor")
     await regular_admin.send("/add_captain_by_id 405 @engineer")
 
     regular_messages = bot_harness.telegram.messages_to(OTHER_CAPTAIN_ID)
-    assert "/add_admin" not in regular_messages[0]
-    assert "/add_captain_by_id" in regular_messages[0]
-    assert regular_messages[1] == messages.PERMISSION_DENIED
-    assert regular_messages[2] == messages.captain_added("@engineer", 405)
+    assert regular_messages[0] == messages.ADMIN_HELP
+    assert regular_messages[1] == messages.CAPTAIN_HELP
+    assert regular_messages[2] == messages.SETUP_HELP
+    assert "/add_admin" not in regular_messages[2]
+    assert regular_messages[3] == messages.PERMISSION_DENIED
+    assert regular_messages[4] == messages.captain_added("@engineer", 405)
     assert bot_harness.store.get_user(404) is None
     added_captain = bot_harness.store.get_user(405)
     assert added_captain is not None
     assert added_captain.role.value == "captain"
+
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/captain_help")
+    await captain.send("/setup_help")
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
+        messages.PERMISSION_DENIED,
+        messages.PERMISSION_DENIED,
+    ]
 
 
 @pytest.mark.asyncio

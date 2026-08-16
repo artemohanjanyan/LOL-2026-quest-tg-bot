@@ -43,9 +43,7 @@ CAPTAIN_HELP = f"""Команди капітана:
 Також можна скористатися командою:
 {ANSWER_GUIDE}"""
 
-ADMIN_HELP = f"""{CAPTAIN_HELP}
-
-Команди організатора:
+ADMIN_HELP = """Команди організатора:
 
 Учасники, результати й зв’язок:
 /add_captain — обрати й додати або активувати капітана
@@ -57,6 +55,17 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 /progress <@username|telegram_id> — показати прогрес капітана
 /activity <@username|telegram_id> — показати хронологію подорожі
 /broadcast — підготувати оголошення
+
+Інші путівники:
+/captain_help — показати команди капітана
+/setup_help — показати налаштування маршруту"""
+
+OWNER_ADMIN_HELP = f"""{ADMIN_HELP}
+
+Керування організаторами:
+/add_admin <telegram_id> <display_name> — додати організатора"""
+
+SETUP_HELP = """Налаштування маршруту:
 
 Редагування маршруту:
 /set_intro — налаштувати вступ
@@ -83,11 +92,6 @@ ADMIN_HELP = f"""{CAPTAIN_HELP}
 Робота з чернеткою:
 /correct_answer <відповідь> — додати варіант правильної відповіді
 /done — опублікувати чернетку"""
-
-OWNER_ADMIN_HELP = f"""{ADMIN_HELP}
-
-Керування організаторами:
-/add_admin <telegram_id> <display_name> — додати організатора"""
 
 USAGE_ANSWER = ANSWER_GUIDE
 USAGE_ADD_ADMIN = "Формат: /add_admin <telegram_id> <display_name>"
