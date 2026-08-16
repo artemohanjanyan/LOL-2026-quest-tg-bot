@@ -24,7 +24,6 @@ def main() -> None:
     settings = Settings.from_env()
     with SQLiteQuestStore.open(
         settings.database_path,
-        busy_timeout_ms=settings.database_busy_timeout_ms,
         lock_instance=True,
     ) as store:
         if settings.bootstrap_admin_id is not None:

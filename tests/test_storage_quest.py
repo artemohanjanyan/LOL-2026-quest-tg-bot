@@ -52,6 +52,63 @@ def start_and_enter_first_stage(store: SQLiteQuestStore) -> None:
     assert entered.position is CaptainPosition.STAGE
 
 
+def test_read_connection_is_query_only(store: SQLiteQuestStore) -> None:
+    connection = store._connection_or_raise()
+
+    assert connection.execute("PRAGMA query_only").fetchone()[0] == 1
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        connection.execute(
+            "UPDATE quest_settings SET time_limit_minutes = 1 WHERE singleton_id = 1"
+        )
+    assert store.get_time_limit() == 80
+
+
+def test_commit_failure_rolls_back_closes_writer_and_allows_next_write(
+    store: SQLiteQuestStore,
+) -> None:
+    with store._transaction() as connection:
+        connection.execute("CREATE TABLE commit_test_parent(id INTEGER PRIMARY KEY)")
+        connection.execute(
+            """
+            CREATE TABLE commit_test_child(
+                parent_id INTEGER REFERENCES commit_test_parent(id)
+                    DEFERRABLE INITIALLY DEFERRED
+            )
+            """
+        )
+
+    failed_connection: sqlite3.Connection | None = None
+    with (
+        pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"),
+        store._transaction() as connection,
+    ):
+        failed_connection = connection
+        connection.execute("INSERT INTO commit_test_child VALUES (1)")
+
+    assert failed_connection is not None
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        failed_connection.execute("SELECT 1")
+    read_connection = store._connection_or_raise()
+    assert read_connection.execute("SELECT count(*) FROM commit_test_child").fetchone()[0] == 0
+
+    with store._transaction() as connection:
+        connection.execute("INSERT INTO commit_test_parent VALUES (1)")
+        connection.execute("INSERT INTO commit_test_child VALUES (1)")
+    assert read_connection.execute("SELECT count(*) FROM commit_test_child").fetchone()[0] == 1
+
+
+def test_nested_write_transaction_is_rejected_immediately(store: SQLiteQuestStore) -> None:
+    with (
+        store._transaction(),
+        pytest.raises(RuntimeError, match="nested SQLiteQuestStore transaction"),
+        store._transaction(),
+    ):
+        pass
+
+    store.set_time_limit(79)
+    assert store.get_time_limit() == 79
+
+
 def test_v1_database_migrates_users_task_names_and_correct_answers(tmp_path: Path) -> None:
     database = tmp_path / "quest.db"
     migration_root = resources.files("quest_bot.storage.migrations")

@@ -14,7 +14,6 @@ class Settings:
     bootstrap_admin_id: int | None = None
     bootstrap_admin_display_name: str = "@admin"
     sweep_interval_seconds: int = 15
-    database_busy_timeout_ms: int = 5_000
     delivery_rate_per_second: int = 20
 
     def __post_init__(self) -> None:
@@ -22,8 +21,6 @@ class Settings:
             raise ValueError("TOKEN must not be empty")
         if self.sweep_interval_seconds <= 0:
             raise ValueError("sweep interval must be positive")
-        if self.database_busy_timeout_ms <= 0:
-            raise ValueError("database busy timeout must be positive")
         if self.delivery_rate_per_second <= 0:
             raise ValueError("delivery rate must be positive")
         if self.bootstrap_admin_id is not None and self.bootstrap_admin_id <= 0:

@@ -5,7 +5,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from importlib import resources
 from pathlib import Path
 from types import TracebackType
@@ -47,7 +47,7 @@ _INTRO_CONTENT_KIND = "intro"
 
 
 class SQLiteQuestStore:
-    """The single, explicitly owned SQLite connection for one bot process."""
+    """A query-only reader plus isolated write connections for one bot process."""
 
     def __init__(
         self,
@@ -59,35 +59,39 @@ class SQLiteQuestStore:
         self._connection: sqlite3.Connection | None = connection
         self._database_path = database_path
         self._lock_fd = lock_fd
+        self._write_in_progress = False
 
     @classmethod
     def open(
         cls,
         database_path: str | os.PathLike[str],
         *,
-        busy_timeout_ms: int = 5_000,
         lock_instance: bool = True,
     ) -> Self:
-        if busy_timeout_ms < 0:
-            raise ValueError("busy_timeout_ms must not be negative")
         if sqlite3.sqlite_version_info < _MIN_SQLITE_VERSION:
             raise RuntimeError("SQLite 3.35 or newer is required")
 
         path = os.fsdecode(database_path)
+        if path == ":memory:":
+            raise ValueError("SQLiteQuestStore requires a file-backed database")
         lock_fd: int | None = None
         connection: sqlite3.Connection | None = None
         try:
-            if lock_instance and path != ":memory:":
+            if lock_instance:
                 lock_fd = cls._acquire_instance_lock(path)
-            opened_connection = sqlite3.connect(path, isolation_level=None)
+            opened_connection = cls._open_connection(path)
             connection = opened_connection
-            opened_connection.row_factory = sqlite3.Row
-            opened_connection.execute("PRAGMA foreign_keys = ON")
-            opened_connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
             opened_connection.execute("PRAGMA journal_mode = WAL")
-            opened_connection.execute("PRAGMA synchronous = NORMAL")
-            store = cls(opened_connection, database_path=path, lock_fd=lock_fd)
+            store = cls(
+                opened_connection,
+                database_path=path,
+                lock_fd=lock_fd,
+            )
             store._run_migrations()
+            opened_connection.execute("PRAGMA query_only = ON")
+            query_only = opened_connection.execute("PRAGMA query_only").fetchone()
+            if query_only is None or int(query_only[0]) != 1:
+                raise RuntimeError("SQLite read connection is not query-only")
             return store
         except BaseException:
             if connection is not None:
@@ -95,6 +99,18 @@ class SQLiteQuestStore:
             if lock_fd is not None:
                 cls._release_instance_lock(lock_fd)
             raise
+
+    @staticmethod
+    def _open_connection(database_path: str) -> sqlite3.Connection:
+        connection = sqlite3.connect(database_path, isolation_level=None)
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA synchronous = NORMAL")
+        except BaseException:
+            connection.close()
+            raise
+        return connection
 
     @staticmethod
     def _acquire_instance_lock(database_path: str) -> int:
@@ -164,26 +180,24 @@ class SQLiteQuestStore:
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
-        connection = self._connection_or_raise()
-        if connection.in_transaction:
+        self._connection_or_raise()
+        if self._write_in_progress:
             raise RuntimeError("nested SQLiteQuestStore transaction")
-        connection.execute("BEGIN IMMEDIATE")
+        self._write_in_progress = True
         try:
-            yield connection
+            with closing(self._open_connection(self._database_path)) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                with connection:
+                    yield connection
         except BaseException as error:
-            was_in_transaction = connection.in_transaction
-            connection.rollback()
             if isinstance(error, sqlite3.Error):
                 LOGGER.exception(
                     "SQLite write transaction failed",
-                    extra={
-                        "database_path": self._database_path,
-                        "in_transaction": was_in_transaction,
-                    },
+                    extra={"database_path": self._database_path},
                 )
             raise
-        else:
-            connection.commit()
+        finally:
+            self._write_in_progress = False
 
     def _run_migrations(self) -> None:
         connection = self._connection_or_raise()
