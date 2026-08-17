@@ -46,9 +46,10 @@ owner-only administration when applicable; `/captain_help` shows the captain
 reference, and `/setup_help` lists route
 configuration commands. Captains receive their own command list from `/help`.
 
-Administrators can inspect either a task-level summary with `/progress` or the
-chronological stage transitions and answer attempts of the current run with
-`/activity`.
+Administrators can inspect either a captain's task-level summary with `/progress`
+or the chronological stage transitions and answer attempts of the current run
+with `/activity`. `/task_stats` summarizes solved-captain counts and normalized
+wrong-answer frequencies for every task across active captains.
 
 For testing, `/reset_captain` prepares a progress reset that must be completed
 with `/confirm_reset_captain` or abandoned with `/cancel`. A confirmed reset

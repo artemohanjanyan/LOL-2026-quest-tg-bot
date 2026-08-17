@@ -52,6 +52,7 @@ ADMIN_HELP = """Команди організатора:
 /reset_captain <@username|telegram_id> — підготувати скидання прогресу
 /list_users — показати учасників
 /leaderboard — показати таблицю результатів
+/task_stats — показати статистику відповідей за завданнями
 /progress <@username|telegram_id> — показати прогрес капітана
 /activity <@username|telegram_id> — показати хронологію подорожі
 /broadcast — підготувати оголошення

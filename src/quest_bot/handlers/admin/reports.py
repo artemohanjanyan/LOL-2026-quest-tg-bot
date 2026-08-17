@@ -47,6 +47,61 @@ async def leaderboard(
     await send_text(update, deps, "\n".join(lines))
 
 
+async def task_stats(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    deps: Dependencies,
+) -> None:
+    report = deps.service.task_statistics(actor_id(update))
+    lines = [
+        "Статистика відповідей за завданнями",
+        f"Капітанів: {report.active_captain_count}",
+        (
+            "Правильність визначено за поточними варіантами відповідей; "
+            "відмінності в регістрі та пробілах об’єднано."
+        ),
+    ]
+    if not report.tasks:
+        lines.extend(("", "Налаштованих завдань немає."))
+
+    current_stage_number = None
+    for item in report.tasks:
+        if item.stage.stage_number != current_stage_number:
+            current_stage_number = item.stage.stage_number
+            lines.extend(
+                (
+                    "",
+                    "━━━━━━━━━━━━━━━━━━━━",
+                    f"🌍 ЕТАП {item.stage.stage_number} — {item.stage.name}",
+                    "━━━━━━━━━━━━━━━━━━━━",
+                )
+            )
+        task_name = f": {item.task.name}" if item.task.name is not None else ""
+        lines.extend(
+            (
+                "",
+                f"Завдання {item.task.task_number}{task_name}",
+                (
+                    f"Розв’язали: {item.solved_captain_count} "
+                    f"із {report.active_captain_count} капітанів"
+                ),
+            )
+        )
+        if not item.wrong_answers:
+            lines.append("Неправильних відповідей не було.")
+            continue
+        lines.append("Неправильні відповіді:")
+        lines.extend(
+            f"• «{answer.answer}» — спроб: {answer.attempt_count}; "
+            f"капітанів: {answer.captain_count}"
+            for answer in item.wrong_answers
+        )
+
+    for chunk in _split_report("\n".join(lines)):
+        await send_text(update, deps, chunk)
+
+
 async def progress(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -228,6 +283,7 @@ def _split_report(text: str, limit: int = _REPORT_MESSAGE_LIMIT) -> tuple[str, .
 def build_handlers(deps: Dependencies) -> list[HandlerType]:
     return [
         CommandHandler("leaderboard", partial(leaderboard, deps=deps)),
+        CommandHandler("task_stats", partial(task_stats, deps=deps)),
         CommandHandler("progress", partial(progress, deps=deps)),
         CommandHandler("activity", partial(activity, deps=deps)),
     ]

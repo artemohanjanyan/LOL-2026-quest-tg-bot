@@ -1036,6 +1036,18 @@ class SQLiteQuestStore:
         )
         return tuple(self._task_attempt_from_row(row) for row in rows)
 
+    def list_active_captain_attempts(self) -> tuple[TaskAttempt, ...]:
+        rows = self._connection_or_raise().execute(
+            """
+            SELECT task_attempts.*
+            FROM task_attempts
+            JOIN users USING (user_id)
+            WHERE users.role = 'captain' AND users.active = 1
+            ORDER BY task_attempts.attempt_id
+            """
+        )
+        return tuple(self._task_attempt_from_row(row) for row in rows)
+
     def list_task_progress(self, user_id: int) -> tuple[TaskProgress, ...]:
         rows = self._connection_or_raise().execute(
             """

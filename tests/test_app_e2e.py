@@ -521,6 +521,51 @@ async def test_activity_excludes_actions_before_latest_reset(bot_harness: BotHar
     assert "«80»" not in activity
 
 
+@pytest.mark.asyncio
+async def test_task_stats_summarizes_active_captain_answers(
+    bot_harness: BotHarness,
+) -> None:
+    inactive_captain_id = 404
+    bot_harness.store.add_captain(OTHER_CAPTAIN_ID, "@fix", BASE_TIME_MS)
+    bot_harness.store.add_captain(inactive_captain_id, "@inactive", BASE_TIME_MS)
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    other_captain = bot_harness.user(OTHER_CAPTAIN_ID, "fix")
+    inactive_captain = bot_harness.user(inactive_captain_id, "inactive")
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+
+    for user in (captain, other_captain, inactive_captain):
+        await user.send("/start")
+        await user.send("/next_stage")
+    await captain.send("/answer 1 Almost")
+    await captain.send("/answer 1 ALMOST")
+    await captain.send("/answer 1 80")
+    await other_captain.send("/answer 1 almost")
+    await other_captain.send("/answer 1 79")
+    await other_captain.send("/answer 3 Філеас Фогг")
+    await inactive_captain.send("/answer 1 excluded")
+    await admin.send(f"/remove_captain {inactive_captain_id}")
+    bot_harness.telegram.clear()
+
+    await admin.send("/task_stats")
+
+    report = "\n".join(bot_harness.telegram.messages_to(ADMIN_ID))
+    assert "Статистика відповідей за завданнями" in report
+    assert "Капітанів: 2" in report
+    assert "━━━━━━━━━━━━━━━━━━━━\n🌍 ЕТАП 1 — Лондон\n━━━━━━━━━━━━━━━━━━━━" in report
+    assert "Завдання 1: Реформ-клуб" in report
+    assert "Розв’язали: 1 із 2 капітанів" in report
+    assert "• «almost» — спроб: 3; капітанів: 2" in report
+    assert "• «79» — спроб: 1; капітанів: 1" in report
+    assert "excluded" not in report
+    assert "Завдання 3" in report
+    assert "Розв’язали: 1 із 2 капітанів" in report
+    assert "Неправильних відповідей не було." in report
+
+    bot_harness.telegram.clear()
+    await captain.send("/task_stats")
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.PERMISSION_DENIED]
+
+
 def test_activity_report_splitting_preserves_long_content() -> None:
     report = "x" * 8_001
 

@@ -1,5 +1,6 @@
 """Quest rules and orchestration independent of Telegram update objects."""
 
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -108,6 +109,27 @@ class CaptainActivityReport:
     transitions: tuple[CaptainTransition, ...]
     answers: tuple[AnswerActivity, ...]
     stages: tuple[Stage, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WrongAnswerStatistics:
+    answer: str
+    attempt_count: int
+    captain_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class TaskAnswerStatistics:
+    stage: Stage
+    task: Task
+    solved_captain_count: int
+    wrong_answers: tuple[WrongAnswerStatistics, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TaskStatisticsReport:
+    active_captain_count: int
+    tasks: tuple[TaskAnswerStatistics, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -574,6 +596,73 @@ class QuestService:
                     item.user.display_name.casefold(),
                 ),
             )
+        )
+
+    def task_statistics(self, actor_id: int) -> TaskStatisticsReport:
+        self.require_admin(actor_id)
+        active_captains = tuple(
+            user
+            for user in self.store.list_users(include_inactive=False)
+            if user.role is UserRole.CAPTAIN
+        )
+        configured_tasks = tuple(
+            (stage, task)
+            for stage in self.store.list_stages()
+            for task in self.store.list_stage_tasks(stage.stage_number)
+        )
+        accepted_answers = {
+            (task.stage_number, task.task_number): frozenset(
+                normalize_answer(answer) for answer in task.correct_answers
+            )
+            for _, task in configured_tasks
+        }
+        solved_captains: dict[tuple[int, int], set[int]] = {}
+        wrong_attempts: Counter[tuple[int, int, str]] = Counter()
+        wrong_captains: dict[tuple[int, int, str], set[int]] = {}
+        for attempt in self.store.list_active_captain_attempts():
+            task_key = (attempt.stage_number, attempt.task_number)
+            if attempt.normalized_answer in accepted_answers.get(task_key, frozenset()):
+                solved_captains.setdefault(task_key, set()).add(attempt.user_id)
+                continue
+            answer_key = (*task_key, attempt.normalized_answer)
+            wrong_attempts[answer_key] += 1
+            wrong_captains.setdefault(answer_key, set()).add(attempt.user_id)
+
+        return TaskStatisticsReport(
+            active_captain_count=len(active_captains),
+            tasks=tuple(
+                TaskAnswerStatistics(
+                    stage=stage,
+                    task=task,
+                    solved_captain_count=len(
+                        solved_captains.get((task.stage_number, task.task_number), ())
+                    ),
+                    wrong_answers=tuple(
+                        sorted(
+                            (
+                                WrongAnswerStatistics(
+                                    answer=answer,
+                                    attempt_count=count,
+                                    captain_count=len(
+                                        wrong_captains[
+                                            (task.stage_number, task.task_number, answer)
+                                        ]
+                                    ),
+                                )
+                                for (
+                                    stage_number,
+                                    task_number,
+                                    answer,
+                                ), count in wrong_attempts.items()
+                                if stage_number == task.stage_number
+                                and task_number == task.task_number
+                            ),
+                            key=lambda item: (-item.attempt_count, item.answer),
+                        )
+                    ),
+                )
+                for stage, task in configured_tasks
+            ),
         )
 
     def captain_progress(self, actor_id: int, reference: str) -> CaptainProgressReport:
