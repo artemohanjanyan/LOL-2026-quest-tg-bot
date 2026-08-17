@@ -146,6 +146,21 @@ async def test_unknown_user_cannot_register_by_contacting_bot(
 
 
 @pytest.mark.asyncio
+async def test_credits_are_available_to_registered_users(bot_harness: BotHarness) -> None:
+    admin = bot_harness.user(ADMIN_ID, "organizer")
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    stranger = bot_harness.user(404, "stranger")
+
+    await admin.send("/credits")
+    await captain.send("/credits")
+    await stranger.send("/credits")
+
+    assert bot_harness.telegram.messages_to(ADMIN_ID) == [messages.CREDITS]
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [messages.CREDITS]
+    assert bot_harness.telegram.messages_to(404) == [messages.UNKNOWN_USER]
+
+
+@pytest.mark.asyncio
 async def test_edited_commands_are_ignored(bot_harness: BotHarness) -> None:
     captain = bot_harness.user(CAPTAIN_ID, "passepartout")
     await captain.send("/start")

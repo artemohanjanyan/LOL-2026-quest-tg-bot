@@ -26,6 +26,7 @@ COMMANDS: tuple[BotCommand, ...] = (
     BotCommand("stage", "повторити поточний етап"),
     BotCommand("status", "перевірити час і прогрес"),
     BotCommand("help", "показати доступні команди"),
+    BotCommand("credits", "переглянути титри експедиції"),
 )
 
 
