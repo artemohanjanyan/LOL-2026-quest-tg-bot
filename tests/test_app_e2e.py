@@ -554,6 +554,31 @@ async def test_zero_score_step_forbids_additional_attempts(bot_harness: BotHarne
 
 
 @pytest.mark.asyncio
+async def test_exhausted_task_does_not_require_skip_confirmation(
+    bot_harness: BotHarness,
+) -> None:
+    seed_second_stage(bot_harness.store)
+    captain = bot_harness.user(CAPTAIN_ID, "passepartout")
+    await captain.send("/start")
+    await captain.send("/next_stage")
+    await captain.send("/answer 1 first")
+    await captain.send("/answer 1 second")
+    await captain.send("/answer 1 third")
+    await captain.send("/answer 3 Філеас Фогг")
+    bot_harness.telegram.clear()
+
+    await captain.send("/next_stage")
+
+    assert bot_harness.telegram.messages_to(CAPTAIN_ID) == [
+        messages.stage_heading(4, "Суець", 1),
+        messages.task_heading(2, 1, 1),
+    ]
+    state = bot_harness.store.get_captain_state(CAPTAIN_ID)
+    assert state.position is CaptainPosition.STAGE
+    assert state.current_stage_number == 4
+
+
+@pytest.mark.asyncio
 async def test_unresolved_advance_requires_confirmation_then_prints_next_stage(
     bot_harness: BotHarness,
 ) -> None:

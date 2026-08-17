@@ -238,13 +238,19 @@ class QuestService:
         else:
             assert state.current_stage_number is not None
             progress = self.store.list_task_progress(actor_id)
+            score_steps = self.store.get_score_steps()
             unsolved = tuple(
-                item.task_number
+                item
                 for item in progress
                 if item.stage_number == state.current_stage_number and not item.solved
             )
-            if unsolved and not confirm_skip:
-                return AdvanceResult(state, None, unsolved, False)
+            retryable_unsolved = tuple(
+                item.task_number
+                for item in unsolved
+                if item.attempt_count < len(score_steps) and score_steps[item.attempt_count] > 0
+            )
+            if retryable_unsolved and not confirm_skip:
+                return AdvanceResult(state, None, retryable_unsolved, False)
             skipped = bool(unsolved)
             next_stage = next(
                 (stage for stage in stages if stage.stage_number > state.current_stage_number),

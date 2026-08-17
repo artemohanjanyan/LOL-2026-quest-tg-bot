@@ -9,7 +9,8 @@ Telegram bot for the 2026 online quest inspired by *Around the World in Eighty D
 A captain starts the clock with `/start` and receives the separately configured
 intro. `/next_stage` explicitly enters the first numbered stage. Each later
 transition prints the stage name and every ordered task prompt; leaving unsolved
-tasks requires `/confirm_next_stage`.
+tasks that still have a scoring attempt requires `/confirm_next_stage`. A task
+with exhausted attempts does not block the transition.
 
 Answers use `/answer <task-number> <answer>`. Comparison applies Unicode NFKC,
 case folding, and whitespace normalization, but does not alter punctuation,
